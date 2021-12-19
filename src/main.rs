@@ -4,13 +4,12 @@ mod fsevent_flags;
 
 use fsevent::FsEvent;
 
+use anyhow::{bail, Result};
 use core_foundation::{
-    array::{CFArrayCreate, CFArray},
-    date::CFTimeInterval,
-    mach_port::CFAllocatorRef,
+    array::CFArray,
+    base::TCFType,
     runloop::{kCFRunLoopDefaultMode, CFRunLoopGetCurrent, CFRunLoopRun},
     string::CFString,
-    base::TCFType,
 };
 use fsevent_sys::{
     kFSEventStreamCreateFlagFileEvents, kFSEventStreamCreateFlagNoDefer,
@@ -18,18 +17,13 @@ use fsevent_sys::{
     FSEventStreamEventFlags, FSEventStreamEventId, FSEventStreamRef,
     FSEventStreamScheduleWithRunLoop, FSEventStreamStart,
 };
-use std::{
-    ffi::CStr,
-    ffi::{c_void, OsStr},
-    os::unix::ffi::OsStrExt,
-    path::PathBuf,
-    ptr, slice,
-};
 
-type EventsCallback = Box<dyn FnMut(&[FsEvent]) + Send>;
+use std::{ffi::c_void, ptr, slice};
 
-extern "C" fn callback(
-    stream: FSEventStreamRef,   // ConstFSEventStreamRef streamRef
+type EventsCallback = Box<dyn FnMut(Vec<FsEvent>) + Send>;
+
+extern "C" fn raw_callback(
+    _stream: FSEventStreamRef,  // ConstFSEventStreamRef streamRef
     callback_info: *mut c_void, // void *clientCallBackInfo
     num_events: usize,          // size_t numEvents
     event_paths: *mut c_void,   // void *eventPaths
@@ -41,47 +35,57 @@ extern "C" fn callback(
         unsafe { slice::from_raw_parts(event_flags as *const FSEventStreamEventFlags, num_events) };
     let event_ids =
         unsafe { slice::from_raw_parts(event_ids as *const FSEventStreamEventId, num_events) };
-
     let events: Vec<_> = event_paths
         .iter()
         .zip(event_flags)
         .zip(event_ids)
         .map(|((&path, &flag), &id)| FsEvent::from_raw(path, flag, id))
         .collect();
-    println!("events_paths: {:#?}", events);
+
+    let callback = unsafe { (callback_info as *mut EventsCallback).as_mut() }.unwrap();
+    callback(events);
 }
 
-fn listen() {
-    let allocator: CFAllocatorRef = ptr::null();
-    let mypath = CFString::new("/");
-    let paths_to_watch = CFArray::from_CFTypes(&[mypath]);
-    // could put stream-specific data here.
-    let context: *const FSEventStreamContext = ptr::null();
-    // Latency in seconds
-    let latency: CFTimeInterval = 0.1; 
+fn listen(paths: Vec<String>, cb: EventsCallback) -> Result<()> {
+    extern "C" fn drop_callback(info: *const c_void) {
+        let _cb: Box<EventsCallback> = unsafe { Box::from_raw(info as _) };
+    }
 
-    // https://developer.apple.com/documentation/coreservices/1455376-fseventstreamcreateflags
+    let paths: Vec<_> = paths.into_iter().map(|x| CFString::new(&x)).collect();
+    let paths = CFArray::from_CFTypes(&paths);
+    let context = Box::leak(Box::new(FSEventStreamContext {
+        version: 0,
+        info: Box::leak(Box::new(cb)) as *mut _ as _,
+        retain: None,
+        release: Some(drop_callback),
+        copy_description: None,
+    }));
+
     let stream: FSEventStreamRef = unsafe {
         FSEventStreamCreate(
-            allocator as _,
-            callback,
+            ptr::null_mut(),
+            raw_callback,
             context,
-            paths_to_watch.as_concrete_TypeRef() as _,
+            paths.as_concrete_TypeRef() as _,
             kFSEventStreamEventIdSinceNow,
-            latency,
+            0.1,
             kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagFileEvents,
         )
     };
-    println!("{:p}", stream);
     let run_loop = unsafe { CFRunLoopGetCurrent() };
-    unsafe {
-        FSEventStreamScheduleWithRunLoop(stream, run_loop as _, kCFRunLoopDefaultMode as _);
-    };
+    unsafe { FSEventStreamScheduleWithRunLoop(stream, run_loop as _, kCFRunLoopDefaultMode as _) };
     let result = unsafe { FSEventStreamStart(stream) };
-    println!("start result: {}", result);
+    if result == 0 {
+        bail!("fs event stream start failed.");
+    }
     unsafe { CFRunLoopRun() };
+    Ok(())
 }
 
-fn main() {
-    listen();
+fn main() -> Result<()> {
+    let paths = vec!["/".into()];
+    listen(paths, Box::new(move |events| {
+        println!("{:#?}", events);
+    }))?;
+    Ok(())
 }
