@@ -77,6 +77,10 @@ pub struct DiskEntry {
 }
 
 impl DiskEntry {
+    pub fn merge(&mut self) {
+        unimplemented!()
+    }
+
     pub fn from_fs(path: &Path) -> DiskEntry {
         fn scan_folder(
             walker: &mut Peekable<DiskWalker>,

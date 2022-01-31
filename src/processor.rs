@@ -1,34 +1,41 @@
 //! Platform independent fs event processor.
-use crate::fsevent::FsEvent;
+use crate::consts::DB_PATH;
+use crate::database::Database;
+use crate::fsevent_id::EventId;
+use crate::{fs_entry::DiskEntry, fsevent::FsEvent};
 
 use anyhow::{bail, Context, Result};
 use crossbeam::channel::{self, Receiver, Sender, TryRecvError, TrySendError};
 use fsevent_sys::FSEventStreamEventId;
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
+
+use std::path::Path;
 use std::{collections::BTreeSet, path::PathBuf};
 
 pub static PROCESSOR: OnceCell<Processor> = OnceCell::new();
 
 pub struct Processor {
-    /// Bounded fs events FIFO pipe for displaying.
-    limited_fs_events: (Sender<FsEvent>, Receiver<FsEvent>),
     /// Raw fs events receiver channel from system.
     events_receiver: Receiver<FsEvent>,
+
+    /// Bounded fs events FIFO pipe for displaying.
+    limited_fs_events: (Sender<FsEvent>, Receiver<FsEvent>),
     /// The event id all the events begins with.
-    since: FSEventStreamEventId,
+    // TODO(ldm0) is this really needed?
+    event_id: EventId,
     /// Paths of current file system.
     core_paths: Mutex<BTreeSet<PathBuf>>,
 }
 
 impl Processor {
     const FS_EVENTS_CHANNEL_LEN: usize = 1024;
-    pub fn new(since: FSEventStreamEventId, events_receiver: Receiver<FsEvent>) -> Self {
+    pub fn new(event_id: EventId, events_receiver: Receiver<FsEvent>) -> Self {
         let (sender, receiver) = channel::bounded(Self::FS_EVENTS_CHANNEL_LEN);
         Self {
             limited_fs_events: (sender, receiver),
             events_receiver,
-            since,
+            event_id,
             core_paths: Mutex::new(BTreeSet::new()),
         }
     }
@@ -69,7 +76,7 @@ impl Processor {
     }
 
     /// Non-blocking process a event.
-    pub fn process(&self) -> Result<()> {
+    pub fn process_event(&self) -> Result<()> {
         let event = self
             .events_receiver
             .recv()
@@ -78,6 +85,20 @@ impl Processor {
         // Provide raw fs event.
         self.fill_fs_event(event).context("fill fs event failed.")?;
         Ok(())
+    }
+
+    pub fn get_db(&self) -> Result<Database> {
+        let db = Database::from_fs(Path::new(DB_PATH)).context("load database failed.")?;
+        Ok(db)
+    }
+
+    pub fn block_on(&self) -> Result<()> {
+        let mut db = self.get_db().context("Get db failed.")?;
+        loop {
+            if let Err(e) = self.process_event() {
+                panic!("processor is down. {}", e);
+            }
+        }
     }
 }
 

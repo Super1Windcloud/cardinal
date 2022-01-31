@@ -1,14 +1,19 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 mod c;
+mod consts;
+mod database;
 pub mod fs_entry;
 mod fsevent;
 mod fsevent_flags;
+mod fsevent_id;
 mod fsevent_pb;
 mod processor;
 mod runtime;
+mod utils;
 
 pub use c::*;
 use fsevent::FsEvent;
+use fsevent_id::EventId;
 pub use processor::take_fs_events;
 use processor::Processor;
 
@@ -92,7 +97,7 @@ impl EventStream {
         Self { stream }
     }
 
-    fn watch(self) -> Result<()> {
+    fn block_watch(self) -> Result<()> {
         let run_loop = unsafe { CFRunLoopGetCurrent() };
         unsafe {
             FSEventStreamScheduleWithRunLoop(self.stream, run_loop as _, kCFRunLoopDefaultMode as _)
@@ -106,21 +111,7 @@ impl EventStream {
     }
 }
 
-struct EventId {
-    since: u64,
-    timestamp: i64,
-}
-
-impl EventId {
-    // Return latest event id and timestamp.
-    fn now() -> Self {
-        let since = unsafe { FSEventsGetCurrentEventId() };
-        let timestamp = time::OffsetDateTime::now_utc().unix_timestamp();
-        Self { since, timestamp }
-    }
-}
-
-fn spawn_watcher(since: FSEventStreamEventId) -> Receiver<FsEvent> {
+fn spawn_event_watcher(since: FSEventStreamEventId) -> Receiver<FsEvent> {
     let (sender, receiver) = channel::unbounded();
     runtime().spawn_blocking(move || {
         EventStream::new(
@@ -132,25 +123,23 @@ fn spawn_watcher(since: FSEventStreamEventId) -> Receiver<FsEvent> {
                 }
             }),
         )
-        .watch()
+        .block_watch()
         .unwrap();
     });
     receiver
 }
 
-fn spawn_processor(since: FSEventStreamEventId, receiver: Receiver<FsEvent>) {
-    if let Err(_) = processor::PROCESSOR.set(Processor::new(since, receiver)) {
+fn spawn_event_processor(event_id: EventId, receiver: Receiver<FsEvent>) {
+    if let Err(_) = processor::PROCESSOR.set(Processor::new(event_id, receiver)) {
         panic!("Multiple initialization");
     }
-    runtime().spawn_blocking(|| loop {
-        if let Err(e) = processor::PROCESSOR.get().unwrap().process() {
-            panic!("processor is down. {}", e);
-        }
-    });
+    runtime().spawn_blocking(|| processor::PROCESSOR.get().unwrap().block_on());
 }
 
 pub fn init_sdk() {
     let event_id = EventId::now();
-    let receiver = spawn_watcher(event_id.since);
-    spawn_processor(event_id.since, receiver);
+    // A global event watcher spawned on a dedicated thread.
+    let receiver = spawn_event_watcher(event_id.since);
+    // A global event processor spawned on a dedicated thread.
+    spawn_event_processor(event_id, receiver);
 }
