@@ -129,7 +129,7 @@ impl CardinalDbConnection {
         Ok(())
     }
 
-    fn delete_entry(&mut self, path_to_delete: &[u8]) -> Result<()> {
+    fn delete_entry(&mut self, path_to_delete: &str) -> Result<()> {
         use schema::dir_entrys::dsl::*;
         diesel::delete(dir_entrys.filter(the_path.eq(path_to_delete)))
             .execute(&mut self.conn)
@@ -202,7 +202,7 @@ impl Database {
                     }
                     Err(_e) => {
                         self.conn
-                            .delete_entry(p2b(path))
+                            .delete_entry(&path.to_string_lossy())
                             .context("Delete entry failed.")?;
                     }
                 }

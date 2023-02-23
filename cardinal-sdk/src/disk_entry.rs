@@ -61,7 +61,7 @@ impl DiskEntry {
     pub fn to_raw(&self) -> Result<DiskEntryRaw, bincode::error::EncodeError> {
         let the_meta = bincode::encode_to_vec(&self.meta, CONFIG)?;
         Ok(DiskEntryRaw {
-            the_path: p2b(&self.path).to_vec(),
+            the_path: self.path.to_string_lossy().into_owned(),
             the_meta,
         })
     }
@@ -72,7 +72,7 @@ impl TryFrom<DiskEntryRaw> for DiskEntry {
     fn try_from(entry: DiskEntryRaw) -> Result<Self, Self::Error> {
         let (meta, _) = bincode::decode_from_slice(&entry.the_meta, CONFIG)?;
         Ok(Self {
-            path: b2p(&entry.the_path).to_path_buf(),
+            path: PathBuf::from(entry.the_path),
             meta,
         })
     }

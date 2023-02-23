@@ -9,7 +9,7 @@ diesel::table! {
 
 diesel::table! {
     dir_entrys (the_path) {
-        the_path -> Binary,
+        the_path -> Text,
         the_meta -> Binary,
     }
 }
