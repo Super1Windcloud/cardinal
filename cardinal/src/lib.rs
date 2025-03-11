@@ -5,11 +5,11 @@ mod database;
 mod fs_entry;
 mod processor;
 mod runtime;
-mod utils;
 
 use anyhow::{Context, Result};
 pub use c::*;
 use cardinal_sdk::fsevent;
+use cardinal_sdk::utils;
 use cardinal_sdk::fsevent::spawn_event_watcher;
 use consts::DB_PATH;
 pub use database::Database;

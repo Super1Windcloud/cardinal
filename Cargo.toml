@@ -4,5 +4,6 @@ members = [
     "cardinal",
     "cardinal-sdk",
     "pathbytes",
+    "was",
     "xtask",
 ]

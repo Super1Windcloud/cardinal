@@ -1,0 +1,8 @@
+[package]
+name = "was"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cardinal-sdk.path = "../cardinal-sdk"
+crossbeam = "0.8"

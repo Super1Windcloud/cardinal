@@ -16,7 +16,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 type EventsCallback = Box<dyn FnMut(Vec<FsEvent>) + Send>;
 
-struct EventStream {
+pub struct EventStream {
     stream: FSEventStreamRef,
 }
 
@@ -82,7 +82,7 @@ impl EventStream {
         Self { stream }
     }
 
-    fn block_on(self) -> Result<()> {
+    pub fn block_on(self) -> Result<()> {
         let run_loop = unsafe { CFRunLoopGetCurrent() };
         unsafe {
             FSEventStreamScheduleWithRunLoop(self.stream, run_loop as _, kCFRunLoopDefaultMode as _)
