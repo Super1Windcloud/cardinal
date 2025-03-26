@@ -289,55 +289,6 @@ mod symlink_tests {
 }
 
 #[test]
-fn test_simple_entry_merging() {
-    let tempdir = TempDir::new().unwrap();
-    let path = tempdir.path();
-    // DiskEntry::new()
-}
-
-/* comment out due to fake fs path
-#[test]
-fn test_complex_entry_merging() {
-    // Delete
-    {
-        let mut entry = complex_entry("");
-        entry.merge(&FsEvent {
-            path: "/445.txt".into(),
-            flag: EventFlag::Delete,
-            id: 0,
-        });
-        let mut expected = complex_entry("");
-        expected.entries.remove(&b"445.txt".to_vec()).unwrap();
-        compare_test_entry(&entry.entry, &expected.entry)
-    }
-
-    // Create uncreated file.
-    {
-        let mut entry = complex_entry("");
-        entry.merge(&FsEvent {
-            path: "/asdfasdfknasdf.txt".into(),
-            flag: EventFlag::Create,
-            id: 0,
-        });
-        let expected = complex_entry("");
-        compare_test_entry(&entry.entry, &expected.entry)
-    }
-
-    // Modify uncreated file.
-    {
-        let mut entry = complex_entry("");
-        entry.merge(&FsEvent {
-            path: "/11451419190810.txt".into(),
-            flag: EventFlag::Modify,
-            id: 0,
-        });
-        let expected = complex_entry("");
-        compare_test_entry(&entry.entry, &expected.entry)
-    }
-}
- */
-
-#[test]
 fn test_on_disk_entry_modifying() {
     let tempdir = TempDir::new().unwrap();
     let path = tempdir.path();
