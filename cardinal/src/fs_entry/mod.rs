@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::fsevent::{EventFlag, FsEvent};
+use crate::fsevent::{EventAction, FsEvent};
 use bincode::{Decode, Encode};
 use pathbytes::o2b;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use walkdir::{DirEntry, IntoIter, WalkDir};
 
 #[derive(
@@ -112,13 +112,7 @@ impl DiskEntry {
     ) {
         let next_seg = path_segs.next();
         let entry = self.entries.entry(o2b(seg).to_vec());
-        let flag = match event.flag.try_into() {
-            Ok(flag) => flag,
-            Err(e) => {
-                warn!("unreckonized event flag: {:?}", e);
-                return;
-            }
-        };
+        let flag = event.flag.event_action();
         match entry {
             Entry::Occupied(mut entry) => {
                 if let Some(next_seg) = next_seg {
@@ -131,7 +125,7 @@ impl DiskEntry {
                 } else {
                     // leaf node
                     match flag {
-                        EventFlag::Create | EventFlag::Modify | EventFlag::Delete => {
+                        EventAction::Modify => {
                             if let Some((name, metadata)) = fs_metadata(&event.path) {
                                 debug_assert_eq!(name, o2b(seg));
                                 entry.insert(DiskEntry::new(metadata));
@@ -139,6 +133,7 @@ impl DiskEntry {
                                 entry.remove_entry();
                             }
                         }
+                        _ => {}
                     }
                 }
             }
@@ -158,12 +153,13 @@ impl DiskEntry {
                 } else {
                     // leaf node, just insert it to the entry if it's present
                     match flag {
-                        EventFlag::Create | EventFlag::Modify | EventFlag::Delete => {
+                        EventAction::Modify => {
                             if let Some((name, metadata)) = fs_metadata(&event.path) {
                                 debug_assert_eq!(name, o2b(seg));
                                 entry.insert(DiskEntry::new(metadata));
                             }
                         }
+                        _ => {}
                     }
                 }
             }

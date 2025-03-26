@@ -2,7 +2,7 @@ mod event_flag;
 mod event_id;
 mod event_stream;
 
-pub use event_flag::{EventFlag, MacEventFlag, ScanType};
+pub use event_flag::{EventAction, EventFlag, ScanType};
 pub use event_id::EventId;
 pub use event_stream::{EventStream, spawn_event_watcher};
 use fsevent_sys::FSEventStreamEventId;
@@ -17,7 +17,7 @@ pub struct FsEvent {
     /// The path of this event.
     pub path: PathBuf,
     /// The event type.
-    pub flag: MacEventFlag,
+    pub flag: EventFlag,
     /// The event id.
     pub id: FSEventStreamEventId,
 }
@@ -27,7 +27,7 @@ impl FsEvent {
         let path = unsafe { CStr::from_ptr(path) };
         let path = OsStr::from_bytes(path.to_bytes());
         let path = PathBuf::from(path);
-        let flag = MacEventFlag::from_bits_truncate(flag);
+        let flag = EventFlag::from_bits_truncate(flag);
         FsEvent { path, flag, id }
     }
 }

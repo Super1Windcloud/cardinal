@@ -1,5 +1,5 @@
 use super::*;
-use cardinal_sdk::fsevent::MacEventFlag;
+use cardinal_sdk::fsevent::EventFlag;
 use pathbytes::b2p;
 use std::{
     fs::{self, File, OpenOptions},
@@ -365,12 +365,12 @@ fn test_on_disk_entry_modifying() {
     let mut entry = ComplexEntry::from_fs(path);
     entry.merge(&FsEvent {
         path: path.join("445.txt"),
-        flag: MacEventFlag::ItemModified,
+        flag: EventFlag::ItemModified,
         id: 0,
     });
     entry.merge(&FsEvent {
         path: path.join("src/template/hello.java"),
-        flag: MacEventFlag::ItemModified,
+        flag: EventFlag::ItemModified,
         id: 0,
     });
     let x = entry.entries.get(&b"445.txt".to_vec()).unwrap();
@@ -408,12 +408,12 @@ fn test_on_disk_entry_deleting() {
     let mut entry = ComplexEntry::from_fs(path);
     entry.merge(&FsEvent {
         path: path.join("445.txt"),
-        flag: MacEventFlag::ItemRemoved,
+        flag: EventFlag::ItemRemoved,
         id: 0,
     });
     entry.merge(&FsEvent {
         path: path.join("src/template"),
-        flag: MacEventFlag::ItemRemoved,
+        flag: EventFlag::ItemRemoved,
         id: 0,
     });
 
@@ -446,12 +446,12 @@ fn test_on_disk_entry_creating() {
     let mut entry = ComplexEntry::from_fs(path);
     entry.merge(&FsEvent {
         path: path.join("foobar.txt"),
-        flag: MacEventFlag::ItemCreated,
+        flag: EventFlag::ItemCreated,
         id: 0,
     });
     entry.merge(&FsEvent {
         path: path.join("fook/barm/tmp"),
-        flag: MacEventFlag::ItemCreated,
+        flag: EventFlag::ItemCreated,
         id: 0,
     });
 

@@ -1,7 +1,7 @@
 #![allow(non_upper_case_globals)]
 use bitflags::bitflags;
 bitflags! {
-    pub struct MacEventFlag: u32 {
+    pub struct EventFlag: u32 {
         const None = fsevent_sys::kFSEventStreamEventFlagNone;
         const MustScanSubDirs = fsevent_sys::kFSEventStreamEventFlagMustScanSubDirs;
         const UserDropped = fsevent_sys::kFSEventStreamEventFlagUserDropped;
@@ -46,17 +46,15 @@ pub enum ScanType {
     Nop,
 }
 
-impl MacEventFlag {
+impl EventFlag {
     pub fn event_type(&self) -> EventType {
-        if self.contains(MacEventFlag::IsHardlink)
-            | self.contains(MacEventFlag::IsLastHardlink)
-        {
+        if self.contains(EventFlag::IsHardlink) | self.contains(EventFlag::IsLastHardlink) {
             EventType::Hardlink
-        } else if self.contains(MacEventFlag::ItemIsSymlink) {
+        } else if self.contains(EventFlag::ItemIsSymlink) {
             EventType::Symlink
-        } else if self.contains(MacEventFlag::ItemIsDir) {
+        } else if self.contains(EventFlag::ItemIsDir) {
             EventType::Dir
-        } else if self.contains(MacEventFlag::ItemIsFile) {
+        } else if self.contains(EventFlag::ItemIsFile) {
             EventType::File
         } else {
             EventType::Unknown
@@ -66,7 +64,7 @@ impl MacEventFlag {
     pub fn scan_type(&self) -> ScanType {
         let event_type = self.event_type();
         let is_dir = matches!(event_type, EventType::Dir);
-        if self.contains(MacEventFlag::None) {
+        if self.contains(EventFlag::None) {
             // Strange event, doesn't know when it happens, processing it using a generic way
             // e.g. new event: fs_event=FsEvent { path: "/.docid/16777229/changed/782/src=0,dst=41985052", flag: kFSEventStreamEventFlagNone, id: 471533015 }
             if is_dir {
@@ -74,54 +72,52 @@ impl MacEventFlag {
             } else {
                 ScanType::SingleNode
             }
-        } else if self.contains(MacEventFlag::MustScanSubDirs)
-            | self.contains(MacEventFlag::UserDropped)
-            | self.contains(MacEventFlag::KernelDropped)
+        } else if self.contains(EventFlag::MustScanSubDirs)
+            | self.contains(EventFlag::UserDropped)
+            | self.contains(EventFlag::KernelDropped)
         {
             ScanType::ReScan
-        } else if self.contains(MacEventFlag::EventIdsWrapped)
-            | self.contains(MacEventFlag::HistoryDone)
+        } else if self.contains(EventFlag::EventIdsWrapped)
+            | self.contains(EventFlag::HistoryDone)
         {
             ScanType::Nop
-        } else if self.contains(MacEventFlag::RootChanged) {
+        } else if self.contains(EventFlag::RootChanged) {
             // Should never happen since we are watching "/"
             assert!(false);
             ScanType::ReScan
-        } else if self.contains(MacEventFlag::Unmount)
-            | self.contains(MacEventFlag::Mount)
-        {
+        } else if self.contains(EventFlag::Unmount) | self.contains(EventFlag::Mount) {
             assert!(is_dir);
             ScanType::Folder
-        } else if self.contains(MacEventFlag::ItemCreated) {
+        } else if self.contains(EventFlag::ItemCreated) {
             // creating dir is also single node
             ScanType::SingleNode
-        } else if self.contains(MacEventFlag::ItemRemoved) {
+        } else if self.contains(EventFlag::ItemRemoved) {
             if is_dir {
                 ScanType::Folder
             } else {
                 ScanType::SingleNode
             }
-        } else if self.contains(MacEventFlag::ItemInodeMetaMod) {
+        } else if self.contains(EventFlag::ItemInodeMetaMod) {
             // creating dir is also single node
             ScanType::SingleNode
-        } else if self.contains(MacEventFlag::ItemRenamed) {
+        } else if self.contains(EventFlag::ItemRenamed) {
             if is_dir {
                 ScanType::Folder
             } else {
                 ScanType::SingleNode
             }
-        } else if self.contains(MacEventFlag::ItemModified) {
+        } else if self.contains(EventFlag::ItemModified) {
             assert!(!is_dir);
             ScanType::SingleNode
-        } else if self.contains(MacEventFlag::ItemFinderInfoMod)
-            | self.contains(MacEventFlag::ItemChangeOwner)
-            | self.contains(MacEventFlag::ItemXattrMod)
+        } else if self.contains(EventFlag::ItemFinderInfoMod)
+            | self.contains(EventFlag::ItemChangeOwner)
+            | self.contains(EventFlag::ItemXattrMod)
         {
             // creating dir is also single node
             ScanType::SingleNode
-        } else if self.contains(MacEventFlag::OwnEvent) {
+        } else if self.contains(EventFlag::OwnEvent) {
             unreachable!()
-        } else if self.contains(MacEventFlag::Cloned) {
+        } else if self.contains(EventFlag::Cloned) {
             if is_dir {
                 ScanType::Folder
             } else {
@@ -131,53 +127,32 @@ impl MacEventFlag {
             panic!("unexpected event: {:?}", self)
         }
     }
+
+    pub fn event_action(&self) -> EventAction {
+        let f = self;
+        if f.contains(EventFlag::ItemCreated)
+            || f.contains(EventFlag::ItemRemoved)
+            || f.contains(EventFlag::Unmount)
+            || f.contains(EventFlag::ItemInodeMetaMod)
+            || f.contains(EventFlag::ItemXattrMod)
+            || f.contains(EventFlag::ItemChangeOwner)
+            || f.contains(EventFlag::ItemFinderInfoMod)
+            || f.contains(EventFlag::ItemModified)
+            // Nowhere to distinguish it's 'from' or 'to'.
+            || f.contains(EventFlag::ItemRenamed)
+            // Nowhere to distinguish it's 'from' or 'to'.
+            || f.contains(EventFlag::Cloned)
+        {
+            EventAction::Modify
+        } else {
+            EventAction::Unknown
+        }
+    }
 }
 
 /// Abstract action of a file system event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum EventFlag {
-    Create,
-    Delete,
+pub enum EventAction {
     Modify,
-}
-
-impl TryFrom<MacEventFlag> for EventFlag {
-    type Error = MacEventFlag;
-    fn try_from(f: MacEventFlag) -> Result<Self, MacEventFlag> {
-        if f.contains(MacEventFlag::ItemCreated) {
-            Ok(EventFlag::Create)
-        } else if f.contains(MacEventFlag::ItemRemoved)
-            | f.contains(MacEventFlag::Unmount)
-        {
-            Ok(EventFlag::Delete)
-        } else if f.contains(MacEventFlag::ItemInodeMetaMod)
-            | f.contains(MacEventFlag::ItemXattrMod)
-            | f.contains(MacEventFlag::ItemChangeOwner)
-            | f.contains(MacEventFlag::ItemFinderInfoMod)
-            | f.contains(MacEventFlag::ItemModified)
-            // Nowhere to distinguish it's 'from' or 'to'.
-            | f.contains(MacEventFlag::ItemRenamed)
-            // Nowhere to distinguish it's 'from' or 'to'.
-            | f.contains(MacEventFlag::Cloned)
-        {
-            Ok(EventFlag::Modify)
-        } else if f.contains(MacEventFlag::MustScanSubDirs)
-            | f.contains(MacEventFlag::UserDropped)
-            | f.contains(MacEventFlag::KernelDropped)
-            | f.contains(MacEventFlag::EventIdsWrapped)
-            // check the FSEvents.h it's implementation will be special
-            | f.contains(MacEventFlag::Mount)
-        {
-            Err(f)
-        } else if
-        // we are watching root, so this will never happen.
-        f.contains(MacEventFlag::RootChanged)
-            // MarkSelf is not set on monitoring
-            | f.contains(MacEventFlag::OwnEvent)
-        {
-            unreachable!()
-        } else {
-            Err(f)
-        }
-    }
+    Unknown,
 }
