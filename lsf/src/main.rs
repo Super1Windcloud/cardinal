@@ -1,7 +1,6 @@
 use bincode::{Decode, Encode};
-use cardinal_sdk::name_pool::NamePool;
 use fswalk::{Node, WalkData, walk_it};
-use mimalloc::MiMalloc;
+use namepool::NamePool;
 use serde::{Deserialize, Serialize};
 use slab::Slab;
 use std::{
@@ -11,9 +10,6 @@ use std::{
     path::PathBuf,
     time::{Instant, UNIX_EPOCH},
 };
-
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
 
 #[derive(Serialize, Deserialize, Encode, Decode)]
 struct SlabNode {
@@ -73,21 +69,6 @@ fn ctime_mtime_from_metadata(metadata: &Metadata) -> (Option<u64>, Option<u64>) 
     (ctime, mtime)
 }
 
-pub fn memory_size() {
-    let mut current_rss = 0;
-    unsafe { libmimalloc_sys::mi_process_info(
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        &mut current_rss,
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-        std::ptr::null_mut(),
-    ) };
-    println!("current rss {}MB", current_rss / 1024 / 1024);
-}
-
 fn construct_node_slab(parent: Option<usize>, node: &Node, slab: &mut Slab<SlabNode>) -> usize {
     let slab_node = SlabNode {
         parent,
@@ -132,8 +113,6 @@ fn main() {
         dbg!(walk_data);
         dbg!(visit_time.elapsed());
 
-        memory_size();
-
         // 然后创建 slab
         let slab_time = Instant::now();
         let mut slab = Slab::new();
@@ -142,12 +121,8 @@ fn main() {
         dbg!(slab_root);
         dbg!(slab.len());
 
-        memory_size();
-
         (slab, slab_root)
     };
-
-    memory_size();
 
     {
         let name_index_time = Instant::now();
@@ -169,8 +144,6 @@ fn main() {
         dbg!(name_pool.len() / 1024 / 1024);
         dbg!(search_time.elapsed());
     }
-
-    memory_size();
 
     {
         let bincode_time = Instant::now();

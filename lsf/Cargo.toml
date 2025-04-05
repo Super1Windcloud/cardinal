@@ -1,0 +1,12 @@
+[package]
+name = "lsf"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fswalk.path = "../fswalk"
+namepool.path = "../namepool"
+bincode = "2"
+zstd = "0.13"
+serde = { version = "1", features = ["derive"] }
+slab = { git = "https://github.com/ldm0/slab", branch = "bincode_support", features = ["serde", "bincode"] }
