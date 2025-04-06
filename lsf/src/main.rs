@@ -154,6 +154,7 @@ struct PersistentStorage {
 }
 
 const CACHE_PATH: &str = "target/cache.zstd";
+const CACHE_TMP_PATH: &str = "target/cache.zstd.tmp";
 const BINCODE_CONDFIG: Configuration = bincode::config::standard();
 
 fn main() {
@@ -215,19 +216,22 @@ fn main() {
 
     {
         let cache_encode_time = Instant::now();
-        let output = File::create(CACHE_PATH).unwrap();
-        let mut output = zstd::Encoder::new(output, 6).unwrap();
-        output
-            .multithread(available_parallelism().map(|x| x.get() as u32).unwrap_or(4))
+        {
+            let output = File::create(CACHE_TMP_PATH).unwrap();
+            let mut output = zstd::Encoder::new(output, 6).unwrap();
+            output
+                .multithread(available_parallelism().map(|x| x.get() as u32).unwrap_or(4))
+                .unwrap();
+            let output = output.auto_finish();
+            let mut output = BufWriter::new(output);
+            bincode::encode_into_std_write(
+                &PersistentStorage { slab, name_index },
+                &mut output,
+                BINCODE_CONDFIG,
+            )
             .unwrap();
-        let output = output.auto_finish();
-        let mut output = BufWriter::new(output);
-        bincode::encode_into_std_write(
-            &PersistentStorage { slab, name_index },
-            &mut output,
-            BINCODE_CONDFIG,
-        )
-        .unwrap();
+        }
+        fs::rename(CACHE_TMP_PATH, CACHE_PATH).unwrap();
         dbg!(cache_encode_time.elapsed());
         dbg!(fs::metadata(CACHE_PATH).unwrap().len() / 1024 / 1024);
     }
