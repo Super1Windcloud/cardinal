@@ -76,6 +76,22 @@ impl NamePool {
             })
         })
     }
+
+    // prefix should starts with a \0, e.g. b"\0hello"
+    pub fn search_prefix<'a>(&'a self, prefix: &'a [u8]) -> impl Iterator<Item = &'a str> + 'a {
+        assert_eq!(prefix[0], 0);
+        let mut last_end = 0;
+        memchr::memmem::find_iter(&self.pool, prefix)
+            // To make sure it points to the end of the prefix. If we use the begin index, we will get a string before the correct one.
+            .map(|x| x + prefix.len() - 1)
+            .filter_map(move |x| {
+                (x > last_end).then(|| {
+                    let (new_end, s) = self.get(x);
+                    last_end = new_end;
+                    s
+                })
+            })
+    }
 }
 
 #[cfg(test)]
@@ -256,5 +272,72 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "世界");
         assert_eq!(result[1], "こんにちは世界");
+    }
+
+    #[test]
+    fn test_search_prefix() {
+        let mut pool = NamePool::new();
+        pool.push("hello");
+        pool.push("world");
+        pool.push("hello world");
+        pool.push("hello world hello");
+
+        let prefix = b"\0hello";
+        let result: Vec<_> = pool.search_prefix(prefix).collect();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "hello");
+        assert_eq!(result[1], "hello world");
+        assert_eq!(result[2], "hello world hello");
+    }
+
+    #[test]
+    fn test_search_prefix_nonexistent() {
+        let mut pool = NamePool::new();
+        pool.push("hello");
+        pool.push("world");
+
+        let prefix = b"\0nonexistent";
+        let result: Vec<_> = pool.search_prefix(prefix).collect();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_search_prefix_partial_match() {
+        let mut pool = NamePool::new();
+        pool.push("hello");
+        pool.push("world");
+        pool.push("hell");
+
+        let prefix = b"\0hell";
+        let result: Vec<_> = pool.search_prefix(prefix).collect();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "hello");
+        assert_eq!(result[1], "hell");
+    }
+
+    #[test]
+    fn test_search_prefix_unicode() {
+        let mut pool = NamePool::new();
+        pool.push("こんにちは");
+        pool.push("世界");
+        pool.push("こんにちは世界");
+
+        let prefix = "\0こんにちは";
+        let result: Vec<_> = pool.search_prefix(prefix.as_bytes()).collect();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "こんにちは");
+        assert_eq!(result[1], "こんにちは世界");
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion `left == right` failed\n  left: 104\n right: 0")]
+    fn test_search_prefix_should_panic() {
+        let mut pool = NamePool::new();
+        pool.push("hello");
+        pool.push("world");
+
+        // This should panic because the prefix does not start with \0
+        let prefix = b"hello";
+        let _result: Vec<_> = pool.search_prefix(prefix).collect();
     }
 }
