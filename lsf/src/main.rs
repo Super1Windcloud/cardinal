@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use slab::Slab;
 use std::{
     collections::BTreeMap,
+    ffi::CString,
     fs::{self, File, Metadata},
     io::{BufReader, BufWriter, Write},
     path::{Path, PathBuf},
@@ -157,7 +158,7 @@ const CACHE_PATH: &str = "target/cache.zstd";
 const CACHE_TMP_PATH: &str = "target/cache.zstd.tmp";
 const BINCODE_CONDFIG: Configuration = bincode::config::standard();
 
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
     let (slab, name_index) = if cli.refresh || !Path::new(CACHE_PATH).exists() {
         let (_slab_root, slab) = walkfs_to_slab();
@@ -197,7 +198,45 @@ fn main() {
         } else if line == "/bye" {
             break;
         }
-        {
+        if line.contains('/') {
+            let segments: Vec<_> = line.split('/').collect();
+            match &*segments {
+                ["", "", ..] => {
+                    eprintln!("bad query: {:?}", segments);
+                    continue;
+                }
+                // /<first>
+                ["", first] => {
+                    let search_time = Instant::now();
+                    let mut prefix = vec![0u8];
+                    prefix.extend_from_slice(first.as_bytes());
+                    for (i, name) in name_pool.search_prefix(&prefix).enumerate() {
+                        if let Some(nodes) = name_index.get(name) {
+                            for &node in nodes {
+                                println!("[{}] {}", i, slab[node].path(&slab));
+                            }
+                        }
+                    }
+                    dbg!(search_time.elapsed());
+                }
+                [last, ""] => {
+                    // TODO(ldm0): this is not a good design, we should use the last segment to search
+                    let search_time = Instant::now();
+                    let suffix = CString::new(*last).context("Query contains nul")?;
+                    for (i, name) in name_pool.search_suffix(&suffix).enumerate() {
+                        if let Some(nodes) = name_index.get(name) {
+                            for &node in nodes {
+                                println!("[{}] {}", i, slab[node].path(&slab));
+                            }
+                        }
+                    }
+                    dbg!(search_time.elapsed());
+                }
+                _ => {
+                    eprintln!("not implemented yet");
+                }
+            }
+        } else {
             // Search out all leafs that contain the substring
             // e.g. "foo": ["/System/foo", "/System/Library/aaafoo"]
             // "/System/Library/aaafool/heck" won't be presented
@@ -217,11 +256,12 @@ fn main() {
     {
         let cache_encode_time = Instant::now();
         {
-            let output = File::create(CACHE_TMP_PATH).unwrap();
-            let mut output = zstd::Encoder::new(output, 6).unwrap();
+            let output = File::create(CACHE_TMP_PATH).context("Failed to create cache file")?;
+            let mut output =
+                zstd::Encoder::new(output, 6).context("Failed to create zstd encoder")?;
             output
                 .multithread(available_parallelism().map(|x| x.get() as u32).unwrap_or(4))
-                .unwrap();
+                .context("Failed to create parallel zstd encoder")?;
             let output = output.auto_finish();
             let mut output = BufWriter::new(output);
             bincode::encode_into_std_write(
@@ -229,12 +269,13 @@ fn main() {
                 &mut output,
                 BINCODE_CONDFIG,
             )
-            .unwrap();
+            .context("Failed to encode cache")?;
         }
         fs::rename(CACHE_TMP_PATH, CACHE_PATH).unwrap();
         dbg!(cache_encode_time.elapsed());
         dbg!(fs::metadata(CACHE_PATH).unwrap().len() / 1024 / 1024);
     }
+    Ok(())
 }
 
 // TODO(ldm0):
