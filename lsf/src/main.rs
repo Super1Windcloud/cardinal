@@ -1,3 +1,5 @@
+mod query;
+
 use anyhow::{Context, Result};
 use bincode::{Decode, Encode, config::Configuration};
 use clap::Parser;
@@ -14,6 +16,7 @@ use std::{
     thread::available_parallelism,
     time::{Instant, UNIX_EPOCH},
 };
+use query::query_segmentation;
 
 #[derive(Serialize, Deserialize, Encode, Decode)]
 struct SlabNode {
@@ -299,3 +302,4 @@ fn main() -> Result<()> {
 // - multi-segment-query-routine
 // [] tui?
 // - lazy metadata design
+
