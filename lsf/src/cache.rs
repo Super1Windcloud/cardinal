@@ -22,7 +22,7 @@ const CACHE_PATH: &str = "target/cache.zstd";
 const CACHE_TMP_PATH: &str = "target/cache.zstd.tmp";
 const BINCODE_CONDFIG: Configuration = bincode::config::standard();
 
-pub fn read_cache_from_file() -> Result<(Slab<SlabNode>, BTreeMap<String, Vec<usize>>)> {
+pub fn read_cache_from_file() -> Result<PersistentStorage> {
     let cache_decode_time = Instant::now();
     let input = File::open(CACHE_PATH).context("Failed to open cache file")?;
     let input = zstd::Decoder::new(input).context("Failed to create zstd decoder")?;
@@ -30,13 +30,10 @@ pub fn read_cache_from_file() -> Result<(Slab<SlabNode>, BTreeMap<String, Vec<us
     let storage: PersistentStorage = bincode::decode_from_std_read(&mut input, BINCODE_CONDFIG)
         .context("Failed to decode cache")?;
     dbg!(cache_decode_time.elapsed());
-    Ok((storage.slab, storage.name_index))
+    Ok(storage)
 }
 
-pub fn write_cache_to_file(
-    slab: Slab<SlabNode>,
-    name_index: BTreeMap<String, Vec<usize>>,
-) -> Result<()> {
+pub fn write_cache_to_file(storage: PersistentStorage) -> Result<()> {
     let cache_encode_time = Instant::now();
     {
         let output = File::create(CACHE_TMP_PATH).context("Failed to create cache file")?;
@@ -47,7 +44,7 @@ pub fn write_cache_to_file(
         let output = output.auto_finish();
         let mut output = BufWriter::new(output);
         bincode::encode_into_std_write(
-            &PersistentStorage { slab, name_index },
+            &storage, // 使用传入的 storage
             &mut output,
             BINCODE_CONDFIG,
         )

@@ -3,7 +3,7 @@ mod query;
 
 use anyhow::{Context, Result};
 use bincode::{Decode, Encode};
-use cache::{cache_exists, read_cache_from_file, write_cache_to_file};
+use cache::{PersistentStorage, cache_exists, read_cache_from_file, write_cache_to_file};
 use clap::Parser;
 use fswalk::{Node, WalkData, walk_it};
 use namepool::NamePool;
@@ -151,13 +151,6 @@ fn name_pool(name_index: &BTreeMap<String, Vec<usize>>) -> NamePool {
     name_pool
 }
 
-#[derive(Encode, Decode)]
-struct PersistentStorage {
-    // slab_root: usize,
-    slab: Slab<SlabNode>,
-    name_index: BTreeMap<String, Vec<usize>>,
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let (slab, name_index) = if cli.refresh || !cache_exists() {
@@ -167,12 +160,14 @@ fn main() -> Result<()> {
         (slab, name_index)
     } else {
         println!("Reading cache...");
-        read_cache_from_file().unwrap_or_else(|e| {
-            eprintln!("Failed to read cache: {:?}. Re-walking filesystem...", e);
-            let (_slab_root, slab) = walkfs_to_slab();
-            let name_index = name_index(&slab);
-            (slab, name_index)
-        })
+        read_cache_from_file()
+            .map(|storage| (storage.slab, storage.name_index)) // 从 PersistentStorage 中解构
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to read cache: {:?}. Re-walking filesystem...", e);
+                let (_slab_root, slab) = walkfs_to_slab();
+                let name_index = name_index(&slab);
+                (slab, name_index)
+            })
     };
     let name_pool = name_pool(&name_index);
 
@@ -251,7 +246,8 @@ fn main() -> Result<()> {
         dbg!(search_time);
     }
 
-    write_cache_to_file(slab, name_index).context("Write cache to file failed.")?;
+    write_cache_to_file(PersistentStorage { slab, name_index })
+        .context("Write cache to file failed.")?;
     Ok(())
 }
 
