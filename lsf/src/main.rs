@@ -234,7 +234,7 @@ impl SearchCache {
         result
     }
 
-    fn push_node(&mut self, node: SlabNode) {
+    fn push_node(&mut self, node: SlabNode) -> usize {
         let node_name = node.name.clone();
         let index = self.slab.insert(node);
         if let Some(indexes) = self.name_index.get_mut(&node_name) {
@@ -243,26 +243,62 @@ impl SearchCache {
             self.name_pool.push(&node_name);
             self.name_index.insert(node_name, vec![index]);
         }
+        index
     }
 
-    fn create_dir_all(&mut self, path: &Path) -> Result<()> {
-        // self.slab
-        todo!()
+    // create_node_chain just blindly try create node chain, it doesn't check if the path is really exist on disk.
+    fn create_node_chain(&mut self, path: &Path) -> usize {
+        let mut current = self.slab_root;
+        for name in path
+            .components()
+            .map(|x| x.as_os_str().to_string_lossy().into_owned())
+        {
+            current = if let Some(&index) = self.slab[current]
+                .children
+                .iter()
+                .find(|&&x| self.slab[x].name == name)
+            {
+                index
+            } else {
+                // TODO(ldm0): optimize: slab node children is empty, we can create a node chain directly.
+                let node = SlabNode {
+                    parent: Some(current),
+                    children: vec![],
+                    name,
+                };
+                let index = self.push_node(node);
+                self.slab[current].children.push(index);
+                index
+            };
+        }
+        current
     }
 
-    fn scan_dir(&mut self, path: &Path) -> Result<()> {
-        /*
+    // `Self::scan_dir`function returns index of the constructed node.
+    // Procedure contains metadata fetching, if fetching failed, None is returned.
+    fn scan_dir(&mut self, path: &Path) -> Option<usize> {
+        if path.metadata().is_err() {
+            return None;
+        };
+        // Ensure node of the path parent is existed
+        let parent = path.parent().map(|parent| self.create_node_chain(parent));
+
         let walk_data = WalkData::new();
         let node = walk_it(path, &walk_data);
         if let Some(node) = node {
-            self.push
+            Some(construct_node_slab(parent, &node, &mut self.slab))
+        } else {
+            None
         }
-         */
-        todo!()
     }
 
-    fn scan_file(&mut self, path: PathBuf) -> Result<()> {
-        todo!()
+    // `Self::scan_file`function returns index of the constructed node.
+    // Procedure contains metadata fetching, if fetching failed, None is returned.
+    fn scan_file(&mut self, path: &Path) -> Option<usize> {
+        if path.metadata().is_err() {
+            return None;
+        };
+        Some(self.create_node_chain(path))
     }
 
     fn remove_node(&mut self, index: usize) {
