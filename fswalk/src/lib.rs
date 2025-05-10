@@ -3,7 +3,7 @@ use rayon::{iter::ParallelBridge, prelude::ParallelIterator};
 use serde::Serialize;
 use std::{
     fs,
-    io::Error,
+    io::{Error, ErrorKind},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -43,7 +43,19 @@ fn walk(dir: &Path, walk_data: &WalkData) -> Option<Node> {
     if walk_data.ignore_directory.as_deref() == Some(dir) {
         return None;
     }
-    let metadata = &dir.metadata().ok();
+    let metadata = match dir.metadata() {
+        Ok(metadata) => Some(metadata),
+        // If it's not found, we definitely don't want it.
+        Err(e) if e.kind() == ErrorKind::NotFound => return None,
+        // If it's permission denied or something, we still want to insert it into the tree.
+        Err(e) => {
+            if handle_error_and_retry(&e) {
+                dir.metadata().ok()
+            } else {
+                None
+            }
+        }
+    };
     let children = if metadata.as_ref().map(|x| x.is_dir()).unwrap_or_default() {
         walk_data.num_dirs.fetch_add(1, Ordering::Relaxed);
         let read_dir = fs::read_dir(&dir);
