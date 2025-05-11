@@ -431,7 +431,8 @@ impl SearchCache {
     pub fn handle_fs_events(&mut self, events: Vec<FsEvent>) {
         for event in events {
             if event.flag.contains(EventFlag::HistoryDone) {
-                println!("History processing done");
+                println!("History processing done: {:?}", event);
+                continue;
             }
             self.handle_fs_event(event);
         }
