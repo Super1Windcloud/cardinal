@@ -17,7 +17,7 @@ use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use serde::{Deserialize, Serialize};
 use std::{fs::Metadata, io::Write, time::UNIX_EPOCH};
 
-#[derive(Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
 struct SlabNode {
     parent: Option<usize>,
     children: Vec<usize>,
