@@ -379,7 +379,7 @@ impl SearchCache {
         .context("Write cache to file failed.")
     }
 
-    pub fn update_event_id(&mut self, event_id: u64) {
+    fn update_event_id(&mut self, event_id: u64) {
         if event_id <= self.last_event_id {
             eprintln!("Event id is not increasing, ignoring");
             return;
@@ -392,11 +392,7 @@ impl SearchCache {
             .map(|nodes| nodes.into_iter().map(|node| self.node_path(node)).collect())
     }
 
-    pub fn handle_fs_events(&mut self, events: Vec<FsEvent>) {
-        for event in events {
-            if event.flag.contains(EventFlag::HistoryDone) {
-                println!("History processing done");
-            }
+    fn handle_fs_event(&mut self, event: FsEvent) {
             match event.flag.scan_type() {
                 ScanType::SingleNode => {
                     // TODO(ldm0): use scan_path_nonrecursive until we are confident about each event flag meaning.
@@ -419,6 +415,14 @@ impl SearchCache {
                 ScanType::Nop => {}
             }
             self.update_event_id(event.id);
+    }
+
+    pub fn handle_fs_events(&mut self, events: Vec<FsEvent>) {
+        for event in events {
+            if event.flag.contains(EventFlag::HistoryDone) {
+                println!("History processing done");
+            }
+            self.handle_fs_event(event);
         }
     }
 }
