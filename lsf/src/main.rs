@@ -4,52 +4,12 @@ mod persistent;
 mod query;
 
 use anyhow::{Context, Result};
-use bincode::{Decode, Encode};
 use cache::SearchCache;
 use cardinal_sdk::{EventStream, FSEventStreamEventId, FsEvent};
 use clap::Parser;
 use cli::Cli;
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
-use serde::{Deserialize, Serialize};
-use std::{fs::Metadata, io::Write, time::UNIX_EPOCH};
-
-#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
-struct SlabNode {
-    parent: Option<usize>,
-    children: Vec<usize>,
-    name: String,
-}
-
-pub struct SlabNodeData {
-    pub name: String,
-    pub ctime: Option<u64>,
-    pub mtime: Option<u64>,
-}
-
-impl SlabNodeData {
-    pub fn new(name: String, metadata: &Option<Metadata>) -> Self {
-        let (ctime, mtime) = match metadata {
-            Some(metadata) => ctime_mtime_from_metadata(metadata),
-            None => (None, None),
-        };
-        Self { name, ctime, mtime }
-    }
-}
-
-fn ctime_mtime_from_metadata(metadata: &Metadata) -> (Option<u64>, Option<u64>) {
-    // TODO(ldm0): is this fast enough?
-    let ctime = metadata
-        .created()
-        .ok()
-        .and_then(|x| x.duration_since(UNIX_EPOCH).ok())
-        .map(|x| x.as_secs());
-    let mtime = metadata
-        .modified()
-        .ok()
-        .and_then(|x| x.duration_since(UNIX_EPOCH).ok())
-        .map(|x| x.as_secs());
-    (ctime, mtime)
-}
+use std::io::Write;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();

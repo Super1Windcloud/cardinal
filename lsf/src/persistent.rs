@@ -1,4 +1,4 @@
-use super::SlabNode;
+use crate::cache::SlabNode;
 use anyhow::{Context, Result};
 use bincode::{Decode, Encode, config::Configuration};
 use slab::Slab;

@@ -1,12 +1,13 @@
 use crate::{
-    SlabNode,
     persistent::{PersistentStorage, read_cache_from_file, write_cache_to_file},
     query::{Segment, query_segmentation},
 };
 use anyhow::{Context, Result, anyhow, bail};
+use bincode::{Decode, Encode};
 use cardinal_sdk::{EventFlag, FsEvent, ScanType, current_event_id};
-use fswalk::{Node, WalkData, walk_it};
+use fswalk::{Node, NodeMetadata, WalkData, walk_it};
 use namepool::NamePool;
+use serde::{Deserialize, Serialize};
 use slab::Slab;
 use std::{
     collections::BTreeMap,
@@ -16,6 +17,31 @@ use std::{
     time::Instant,
 };
 use typed_num::Num;
+
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
+pub struct SlabNode {
+    parent: Option<usize>,
+    children: Vec<usize>,
+    name: String,
+    metadata: Option<SlabNodeMetadata>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
+struct SlabNodeMetadata {
+    ctime: Option<u64>,
+    mtime: Option<u64>,
+    size: u64,
+}
+
+impl SlabNodeMetadata {
+    fn new(metadata: &NodeMetadata) -> Self {
+        Self {
+            ctime: metadata.ctime,
+            mtime: metadata.mtime,
+            size: metadata.size,
+        }
+    }
+}
 
 pub struct SearchCache {
     path: PathBuf,
@@ -57,7 +83,7 @@ impl SearchCache {
     pub fn walk_fs(path: PathBuf) -> Self {
         fn walkfs_to_slab(path: &Path) -> (usize, Slab<SlabNode>) {
             // 先多线程构建树形文件名列表(不能直接创建 slab 因为 slab 无法多线程构建(slab 节点有相互引用，不想加锁))
-            let walk_data = WalkData::with_ignore_directory(PathBuf::from("/System/Volumes/Data"));
+            let walk_data = WalkData::new(PathBuf::from("/System/Volumes/Data"), false);
             let visit_time = Instant::now();
             let node = walk_it(path, &walk_data).expect("failed to walk");
             dbg!(walk_data);
@@ -265,6 +291,7 @@ impl SearchCache {
                     parent: Some(current),
                     children: vec![],
                     name,
+                    metadata: None,
                 };
                 let index = self.push_node(node);
                 self.slab[current].children.push(index);
@@ -274,7 +301,7 @@ impl SearchCache {
         current
     }
 
-    // `Self::scan_path_recursive`function returns index of the constructed node.
+    // `Self::scan_path_recursive`function returns index of the constructed node(with metadata provided).
     // - If path is not under the watch root, None is returned.
     // - Procedure contains metadata fetching, if metadata fetching failed, None is returned.
     pub fn scan_path_recursive(&mut self, raw_path: &Path) -> Option<usize> {
@@ -303,7 +330,8 @@ impl SearchCache {
         {
             self.remove_node(old_node);
         }
-        let walk_data = WalkData::with_ignore_directory(PathBuf::from("/System/Volumes/Data"));
+        // For incremental data, we need metadata
+        let walk_data = WalkData::new(PathBuf::from("/System/Volumes/Data"), true);
         walk_it(raw_path, &walk_data).map(|node| {
             let node = create_node_slab_update_name_index_and_name_pool(
                 Some(parent),
@@ -441,6 +469,7 @@ fn construct_node_slab(parent: Option<usize>, node: &Node, slab: &mut Slab<SlabN
         parent,
         children: vec![],
         name: node.name.clone(),
+        metadata: None,
     };
     let index = slab.insert(slab_node);
     slab[index].children = node
@@ -463,6 +492,7 @@ fn create_node_slab_update_name_index_and_name_pool(
         parent,
         children: vec![],
         name: node.name.clone(),
+        metadata: node.metadata.as_ref().map(SlabNodeMetadata::new),
     };
     let index = slab.insert(slab_node);
     if let Some(indexes) = name_index.get_mut(&node.name) {

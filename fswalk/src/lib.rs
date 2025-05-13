@@ -2,10 +2,12 @@ use bincode::Encode;
 use rayon::{iter::ParallelBridge, prelude::ParallelIterator};
 use serde::Serialize;
 use std::{
-    fs,
+    fs::{self, Metadata},
     io::{Error, ErrorKind},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
+    time::UNIX_EPOCH,
 };
 
 #[derive(Serialize, Encode, Debug)]
@@ -13,6 +15,37 @@ pub struct Node {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
     pub name: String,
+    pub metadata: Option<NodeMetadata>,
+}
+
+#[derive(Serialize, Encode, Debug)]
+pub struct NodeMetadata {
+    pub ctime: Option<u64>,
+    pub mtime: Option<u64>,
+    pub size: u64,
+}
+
+impl From<Metadata> for NodeMetadata {
+    fn from(metadata: Metadata) -> Self {
+        Self::new(&metadata)
+    }
+}
+
+impl NodeMetadata {
+    fn new(metadata: &Metadata) -> Self {
+        let ctime = metadata
+            .created()
+            .ok()
+            .and_then(|x| x.duration_since(UNIX_EPOCH).ok())
+            .map(|x| x.as_secs());
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|x| x.duration_since(UNIX_EPOCH).ok())
+            .map(|x| x.as_secs());
+        let size = metadata.size();
+        Self { ctime, mtime, size }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -20,16 +53,15 @@ pub struct WalkData {
     pub num_files: AtomicUsize,
     pub num_dirs: AtomicUsize,
     ignore_directory: Option<PathBuf>,
+    /// If set, metadata will be collected for each file node(folder node will get free metadata).
+    need_metadata: bool,
 }
 
 impl WalkData {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_ignore_directory(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, need_metadata: bool) -> Self {
         Self {
             ignore_directory: Some(path),
+            need_metadata,
             ..Default::default()
         }
     }
@@ -83,6 +115,12 @@ fn walk(path: &Path, walk_data: &WalkData) -> Option<Node> {
                                     return Some(Node {
                                         children: vec![],
                                         name,
+                                        metadata: walk_data
+                                            .need_metadata
+                                            .then_some(entry)
+                                            .and_then(|entry| {
+                                                entry.metadata().ok().map(NodeMetadata::from)
+                                            }),
                                     });
                                 }
                             }
@@ -110,10 +148,13 @@ fn walk(path: &Path, walk_data: &WalkData) -> Option<Node> {
     };
     let name = path
         .file_name()
-        .and_then(|x| x.to_str())
-        .map(|x| x.to_string())
+        .map(|x| x.to_string_lossy().into_owned())
         .unwrap_or_default();
-    Some(Node { children, name })
+    Some(Node {
+        children,
+        name,
+        metadata: metadata.map(NodeMetadata::from),
+    })
 }
 
 fn handle_error_and_retry(failed: &Error) -> bool {
