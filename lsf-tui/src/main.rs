@@ -1,5 +1,3 @@
-use std::result;
-
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
@@ -11,6 +9,7 @@ use ratatui::{
     text::{Line, Text},
     widgets::{Block, Paragraph, Widget},
 };
+use std::result;
 
 #[derive(Debug)]
 pub struct App {
@@ -129,7 +128,7 @@ impl Widget for &App {
             .title_bottom(instructions.centered())
             .border_set(border::THICK);
 
-            let query_line = Line::from(vec![
+        let query_line = Line::from(vec![
             " > ".to_string().green(),
             self.query().clone().yellow(),
         ]);
