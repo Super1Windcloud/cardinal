@@ -1,7 +1,7 @@
-# Tauri + React
-
-This template should help get you started developing with Tauri and React in Vite.
-
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+# TODO
+- HistoryDone then initialized
+- Initializing prograss 
+- Initializing bar
+- Auto search(input delay detection)
+    - 在输入停止时进行搜索(记录第一次InputChange delay，超过500ms 搜索，否则记录到下次 typing 的 delay，超过上次搜索delay 50%/100% 时进行搜索)
+- 修复 zstd-sys 为什么每次都要重新编译啊
