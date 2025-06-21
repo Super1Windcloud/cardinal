@@ -10,6 +10,7 @@ use std::{
     thread::available_parallelism,
     time::Instant,
 };
+use tracing::info;
 use typed_num::Num;
 
 const LSF_VERSION: i64 = 1;
@@ -61,7 +62,7 @@ pub fn write_cache_to_file(storage: PersistentStorage) -> Result<()> {
     }
     fs::rename(CACHE_TMP_PATH, CACHE_PATH).context("Failed to rename cache file")?;
     dbg!(cache_encode_time.elapsed());
-    println!(
+    info!(
         "Cache size: {} MB",
         fs::metadata(CACHE_PATH)
             .context("Failed to get cache file metadata")?

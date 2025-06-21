@@ -15,6 +15,7 @@ slab = { git = "https://github.com/ldm0/slab", branch = "bincode_support", featu
 anyhow = "1.0.97"
 crossbeam-channel = "0.5.15"
 typed-num = { version = "0.3.0", default-features = false, features = ["bincode"] }
+tracing = "0.1"
 
 [dev-dependencies]
 tempdir = "0.3"

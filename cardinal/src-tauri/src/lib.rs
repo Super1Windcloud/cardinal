@@ -5,6 +5,8 @@ use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use search_cache::{SearchCache, SearchNode};
 use std::path::PathBuf;
 use tauri::{Emitter, RunEvent, State};
+use tracing::{info, level_filters::LevelFilter};
+use tracing_subscriber::EnvFilter;
 
 struct SearchState {
     search_tx: Sender<String>,
@@ -58,7 +60,15 @@ fn spawn_event_watcher(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<()> {
-    // 创建通信通道
+    // Initialize the tracing subscriber to print logs to the command line
+    let builder = tracing_subscriber::fmt();
+    if let Ok(filter) = EnvFilter::try_from_default_env() {
+        builder.with_env_filter(filter).init();
+    } else {
+        builder.with_max_level(LevelFilter::INFO).init();
+    }
+
+    // Create communication channels
     let (finish_tx, finish_rx) = bounded::<Sender<SearchCache>>(1);
     let (search_tx, search_rx) = unbounded::<String>();
     let (result_tx, result_rx) = unbounded::<Result<Vec<SearchNode>>>();
@@ -79,10 +89,10 @@ pub fn run() -> Result<()> {
         // 初始化搜索缓存
         let path = PathBuf::from("/");
         let mut cache = if let Ok(cached) = SearchCache::try_read_persistent_cache(&path) {
-            println!("Loaded existing cache");
+            info!("Loaded existing cache");
             cached
         } else {
-            println!("Walking filesystem...");
+            info!("Walking filesystem...");
             SearchCache::walk_fs(path.clone())
         };
 
@@ -90,7 +100,7 @@ pub fn run() -> Result<()> {
 
         // 启动事件监听器
         let event_stream = spawn_event_watcher("/".to_string(), cache.last_event_id());
-        println!("Started background processing thread");
+        info!("Started background processing thread");
 
         loop {
             crossbeam_channel::select! {
@@ -110,7 +120,7 @@ pub fn run() -> Result<()> {
                 }
             }
         }
-        println!("Background thread exited");
+        info!("Background thread exited");
     });
 
     app.run(move |app_handle, event| {
@@ -120,7 +130,7 @@ pub fn run() -> Result<()> {
                 // This allow us to catch tray icon events when there is no window
                 // if we manually requested an exit (code is Some(_)) we will let it go through
                 if code.is_none() {
-                    println!("Tauri application exited, flushing cache...");
+                    info!("Tauri application exited, flushing cache...");
 
                     // TODO(ldm0): is this necessary?
                     api.prevent_exit();
@@ -138,7 +148,7 @@ pub fn run() -> Result<()> {
                         .context("Failed to write cache to file")
                         .unwrap();
 
-                    println!("Cache flushed successfully");
+                    info!("Cache flushed successfully");
 
                     app_handle.exit(66);
                 }

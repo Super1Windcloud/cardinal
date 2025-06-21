@@ -14,6 +14,7 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+use tracing::debug;
 use typed_num::Num;
 
 #[derive(Debug, Serialize, Deserialize, Encode, Decode)]
@@ -135,7 +136,7 @@ impl SearchCache {
             let mut name_index = BTreeMap::default();
             construct_name_index(slab, &mut name_index);
             dbg!(name_index_time.elapsed());
-            println!("name index len: {}", name_index.len());
+            debug!("name index len: {}", name_index.len());
             name_index
         }
 
@@ -318,10 +319,10 @@ impl SearchCache {
             return None;
         };
         let Some(parent) = path.parent() else {
-            println!("!!! Full rescan is needed");
+            debug!("!!! Full rescan is needed");
             // If path is watch root, we need to do a full rescan
             self.rescan();
-            println!("!!! Full rescan done: {:?}", self.slab_root);
+            debug!("!!! Full rescan done: {:?}", self.slab_root);
             return Some(self.slab_root);
         };
         // Ensure node of the path parent is existed
@@ -418,9 +419,9 @@ impl SearchCache {
 
     fn update_last_event_id(&mut self, event_id: u64) {
         if event_id <= self.last_event_id {
-            println!("last_event_id {} |< {event_id}", self.last_event_id);
+            debug!("last_event_id {} |< {event_id}", self.last_event_id);
         } else {
-            println!("last_event_id {} => {event_id}", self.last_event_id);
+            debug!("last_event_id {} => {event_id}", self.last_event_id);
             self.last_event_id = event_id;
         }
     }
@@ -447,19 +448,19 @@ impl SearchCache {
                 // TODO(ldm0): use scan_path_nonrecursive until we are confident about each event flag meaning.
                 let file = self.scan_path_recursive(&event.path);
                 if file.is_some() {
-                    println!("File changed: {:?}, {file:?}", event.path);
+                    debug!("File changed: {:?}, {file:?}", event.path);
                 }
             }
             ScanType::Folder => {
                 let folder = self.scan_path_recursive(&event.path);
                 if folder.is_some() {
-                    println!("Folder changed: {:?}, {folder:?}", event.path);
+                    debug!("Folder changed: {:?}, {folder:?}", event.path);
                 }
             }
             ScanType::ReScan => {
-                println!("!!! Rescanning");
+                debug!("!!! Rescanning");
                 self.rescan();
-                println!("!!! Rescan done: {:?}", self.slab_root);
+                debug!("!!! Rescan done: {:?}", self.slab_root);
             }
             ScanType::Nop => {}
         }
@@ -469,7 +470,7 @@ impl SearchCache {
     pub fn handle_fs_events(&mut self, events: Vec<FsEvent>) {
         for event in events {
             if event.flag.contains(EventFlag::HistoryDone) {
-                println!("History processing done: {:?}", event);
+                debug!("History processing done: {:?}", event);
                 continue;
             }
             self.handle_fs_event(event);
@@ -540,7 +541,7 @@ fn name_pool(name_index: &BTreeMap<String, Vec<usize>>) -> NamePool {
         name_pool.push(name);
     }
     dbg!(name_pool_time.elapsed());
-    println!(
+    debug!(
         "name pool size: {}MB",
         name_pool.len() as f32 / 1024. / 1024.
     );
