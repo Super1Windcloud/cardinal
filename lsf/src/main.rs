@@ -1,14 +1,22 @@
 mod cli;
 
 use anyhow::{Context, Result};
-use cardinal_sdk::{EventStream, FSEventStreamEventId, FsEvent};
+use cardinal_sdk::EventWatcher;
 use clap::Parser;
 use cli::Cli;
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
-use search_cache::{SearchCache, SearchNode};
+use crossbeam_channel::{Sender, bounded, unbounded};
+use search_cache::{HandleFSEError, SearchCache, SearchNode};
 use std::io::Write;
+use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 fn main() -> Result<()> {
+    let builder = tracing_subscriber::fmt();
+    if let Ok(filter) = EnvFilter::try_from_default_env() {
+        builder.with_env_filter(filter).init();
+    } else {
+        builder.with_max_level(LevelFilter::INFO).init();
+    }
+
     let cli = Cli::parse();
     let path = cli.path;
     let mut cache = if cli.refresh {
@@ -29,7 +37,7 @@ fn main() -> Result<()> {
     let (search_result_tx, search_result_rx) = unbounded::<Result<Vec<SearchNode>>>();
 
     std::thread::spawn(move || {
-        let event_stream = spawn_event_watcher("/".to_string(), cache.last_event_id());
+        let mut event_watcher = EventWatcher::spawn("/".to_string(), cache.last_event_id(), 0.1);
         println!("Processing changes during processing");
         loop {
             crossbeam_channel::select! {
@@ -45,9 +53,15 @@ fn main() -> Result<()> {
                         .send(files)
                         .expect("search_result_tx is closed");
                 }
-                recv(event_stream) -> events => {
+                recv(event_watcher.receiver) -> events => {
                     let events = events.expect("event_stream is closed");
-                    cache.handle_fs_events(events);
+                    if let Err(HandleFSEError::Rescan) = cache.handle_fs_events(events) {
+                        println!("!!!!!!!!!! Rescan triggered !!!!!!!!");
+                        // Here we clear event_watcher first as rescan may take a lot of time
+                        event_watcher.clear();
+                        cache.rescan();
+                        event_watcher = EventWatcher::spawn("/".to_string(), cache.last_event_id(), 0.1);
+                    }
                 }
             }
         }
@@ -95,26 +109,6 @@ fn main() -> Result<()> {
         .context("Failed to write cache to file")?;
 
     Ok(())
-}
-
-fn spawn_event_watcher(
-    path: String,
-    since_event_id: FSEventStreamEventId,
-) -> Receiver<Vec<FsEvent>> {
-    let (sender, receiver) = unbounded();
-    std::thread::spawn(move || {
-        EventStream::new(
-            &[&path],
-            since_event_id,
-            0.1,
-            Box::new(move |events| {
-                let _ = sender.send(events);
-            }),
-        )
-        .block_on()
-        .unwrap();
-    });
-    receiver
 }
 
 // TODO(ldm0):

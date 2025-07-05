@@ -1,8 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use anyhow::{Context, Result};
-use cardinal_sdk::{EventFlag, EventStream, FSEventStreamEventId, FsEvent};
+use cardinal_sdk::{EventFlag, EventWatcher};
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
-use search_cache::{SearchCache, SearchNode};
+use search_cache::{HandleFSEError, SearchCache, SearchNode};
 use std::{cell::LazyCell, path::PathBuf};
 use tauri::{Emitter, RunEvent, State};
 use tracing::{info, level_filters::LevelFilter};
@@ -36,26 +36,6 @@ async fn search(query: &str, state: State<'_, SearchState>) -> Result<Vec<String
                 .collect()
         })
         .map_err(|e| e.to_string())
-}
-
-fn spawn_event_watcher(
-    path: String,
-    since_event_id: FSEventStreamEventId,
-) -> Receiver<Vec<FsEvent>> {
-    let (sender, receiver) = unbounded();
-    std::thread::spawn(move || {
-        EventStream::new(
-            &[&path],
-            since_event_id,
-            0.1,
-            Box::new(move |events| {
-                let _ = sender.send(events);
-            }),
-        )
-        .block_on()
-        .unwrap();
-    });
-    receiver
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -102,7 +82,7 @@ pub fn run() -> Result<()> {
         };
 
         // 启动事件监听器
-        let event_stream = spawn_event_watcher("/".to_string(), cache.last_event_id());
+        let mut event_watcher = EventWatcher::spawn("/".to_string(), cache.last_event_id(), 0.1);
         info!("Started background processing thread");
 
         loop {
@@ -117,13 +97,19 @@ pub fn run() -> Result<()> {
                     let result = cache.query_files(query);
                     result_tx.send(result).expect("Failed to send result");
                 }
-                recv(event_stream) -> events => {
+                recv(event_watcher.receiver) -> events => {
                     let events = events.expect("Event stream closed");
                     // Emit HistoryDone inform frontend that cache is ready.
                     if events.iter().any(|x| x.flag == EventFlag::HistoryDone) {
                         *emit_init;
                     }
-                    cache.handle_fs_events(events);
+                    if let Err(HandleFSEError::Rescan) = cache.handle_fs_events(events) {
+                        info!("!!!!!!!!!! Rescan triggered !!!!!!!!");
+                        // Here we clear event_watcher first as rescan may take a lot of time
+                        event_watcher.clear();
+                        cache.rescan();
+                        event_watcher = EventWatcher::spawn("/".to_string(), cache.last_event_id(), 0.1);
+                    }
                 }
             }
         }

@@ -13,3 +13,4 @@ serde = { version = "1", features = ["derive"] }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1.0.97"
 crossbeam-channel = "0.5.15"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

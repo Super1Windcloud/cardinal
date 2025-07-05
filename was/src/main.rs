@@ -1,8 +1,5 @@
-use cardinal_sdk::{
-    EventFlag, EventStream, FSEventStreamEventId, FsEvent, dev_of_path, event_id_to_timestamp,
-};
+use cardinal_sdk::{EventFlag, EventWatcher, dev_of_path, event_id_to_timestamp};
 use clap::Parser;
-use crossbeam::channel::{Receiver, unbounded};
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -22,16 +19,19 @@ fn main() {
             .to_string_lossy()
             .to_string()
     });
-    let event_stream = spawn_event_watcher(path, cli.since);
+    let event_stream = EventWatcher::spawn(path, cli.since, 0.1);
     let mut history_done = false;
     let dev = dev_of_path(c"/").unwrap();
     let timezone = chrono::Local::now().timezone();
     loop {
         let events = if history_done {
             // If history is done, we try to drain the event stream with a timeout.
-            event_stream.recv_timeout(Duration::from_secs_f32(0.5)).ok()
+            event_stream
+                .receiver
+                .recv_timeout(Duration::from_secs_f32(0.5))
+                .ok()
         } else {
-            event_stream.recv().ok()
+            event_stream.receiver.recv().ok()
         };
         let Some(events) = events else {
             break;
@@ -53,24 +53,4 @@ fn main() {
             );
         }
     }
-}
-
-fn spawn_event_watcher(
-    path: String,
-    since_event_id: FSEventStreamEventId,
-) -> Receiver<Vec<FsEvent>> {
-    let (sender, receiver) = unbounded();
-    std::thread::spawn(move || {
-        EventStream::new(
-            &[&path],
-            since_event_id,
-            0.1,
-            Box::new(move |events| {
-                sender.send(events).unwrap();
-            }),
-        )
-        .block_on()
-        .unwrap();
-    });
-    receiver
 }

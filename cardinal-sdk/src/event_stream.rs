@@ -1,20 +1,29 @@
 use crate::FsEvent;
 use anyhow::{Result, bail};
 use core_foundation::{array::CFArray, base::TCFType, string::CFString};
-use dispatch2::ffi::{DISPATCH_QUEUE_SERIAL, dispatch_queue_create};
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use dispatch2::ffi::{DISPATCH_QUEUE_SERIAL, dispatch_queue_create, dispatch_release};
 use fsevent_sys::{
     FSEventStreamContext, FSEventStreamCreate, FSEventStreamEventFlags, FSEventStreamEventId,
-    FSEventStreamRef, FSEventStreamSetDispatchQueue, FSEventStreamStart,
-    core_foundation::CFTimeInterval, kFSEventStreamCreateFlagFileEvents,
-    kFSEventStreamCreateFlagNoDefer, kFSEventStreamCreateFlagWatchRoot,
+    FSEventStreamInvalidate, FSEventStreamRef, FSEventStreamRelease, FSEventStreamSetDispatchQueue,
+    FSEventStreamStart, FSEventStreamStop, core_foundation::CFTimeInterval,
+    kFSEventStreamCreateFlagFileEvents, kFSEventStreamCreateFlagNoDefer,
+    kFSEventStreamCreateFlagWatchRoot,
 };
 use std::{ffi::c_void, ptr, slice};
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 type EventsCallback = Box<dyn FnMut(Vec<FsEvent>) + Send>;
 
 pub struct EventStream {
     stream: FSEventStreamRef,
+}
+
+impl Drop for EventStream {
+    fn drop(&mut self) {
+        unsafe {
+            FSEventStreamRelease(self.stream);
+        }
+    }
 }
 
 impl EventStream {
@@ -81,34 +90,82 @@ impl EventStream {
         Self { stream }
     }
 
-    pub fn block_on(self) -> Result<()> {
+    pub fn spawn(self) -> Result<EventStreamWithQueue> {
         let queue =
             unsafe { dispatch_queue_create(c"cardinal-sdk-queue".as_ptr(), DISPATCH_QUEUE_SERIAL) };
+        if queue.is_null() {
+            bail!("dispatch queue create failed.");
+        }
         unsafe { FSEventStreamSetDispatchQueue(self.stream, queue) };
         let result = unsafe { FSEventStreamStart(self.stream) };
         if result == 0 {
+            // TODO(ldm0): RAII
+            unsafe { FSEventStreamStop(self.stream) };
+            unsafe { FSEventStreamInvalidate(self.stream) };
+            unsafe { dispatch_release(queue.cast()) };
             bail!("fs event stream start failed.");
         }
-        Ok(())
+        let stream = self.stream;
+        std::mem::forget(self);
+        Ok(EventStreamWithQueue { stream, queue })
     }
 }
 
-pub fn spawn_event_watcher(
-    since_event_id: FSEventStreamEventId,
-) -> UnboundedReceiver<Vec<FsEvent>> {
-    let (sender, receiver) = unbounded_channel();
-    std::thread::spawn(move || {
-        EventStream::new(
-            &["/"],
-            since_event_id,
-            0.1,
-            Box::new(move |events| {
-                // Fun fact, events here are not sorted by event id.
-                sender.send(events).unwrap();
-            }),
-        )
-        .block_on()
-        .unwrap();
-    });
-    receiver
+/// FSEventStream with dispatch queue.
+///
+/// Dropping this struct will stop the FSEventStream and release the dispatch queue.
+pub struct EventStreamWithQueue {
+    stream: FSEventStreamRef,
+    queue: dispatch2::ffi::dispatch_queue_t,
+}
+
+impl Drop for EventStreamWithQueue {
+    fn drop(&mut self) {
+        unsafe {
+            FSEventStreamStop(self.stream);
+            FSEventStreamInvalidate(self.stream);
+            FSEventStreamRelease(self.stream);
+            dispatch_release(self.queue.cast())
+        }
+    }
+}
+
+pub struct EventWatcher {
+    pub receiver: Receiver<Vec<FsEvent>>,
+    _cancellation_token: Sender<()>,
+}
+
+impl EventWatcher {
+    pub fn noop() -> Self {
+        Self {
+            receiver: unbounded().1,
+            _cancellation_token: bounded::<()>(1).0,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        let _ = std::mem::replace(self, Self::noop());
+    }
+
+    pub fn spawn(path: String, since_event_id: FSEventStreamEventId, latency: f64) -> EventWatcher {
+        let (_cancellation_token, cancellation_token_rx) = bounded::<()>(1);
+        let (sender, receiver) = unbounded();
+        std::thread::spawn(move || {
+            let _stream_and_queue = EventStream::new(
+                &[&path],
+                since_event_id,
+                latency,
+                Box::new(move |events| {
+                    let _ = sender.send(events);
+                }),
+            )
+            .spawn()
+            .unwrap();
+            let _ = cancellation_token_rx.recv();
+        });
+        EventWatcher {
+            receiver,
+            _cancellation_token,
+        }
+    }
 }

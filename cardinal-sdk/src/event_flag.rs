@@ -69,7 +69,9 @@ impl EventFlag {
     pub fn scan_type(&self) -> ScanType {
         let event_type = self.event_type();
         let is_dir = matches!(event_type, EventType::Dir);
-        if self.contains(EventFlag::None) {
+        if self.contains(EventFlag::HistoryDone) {
+            return ScanType::Nop;
+        } else if self.contains(EventFlag::None) {
             // Strange event, doesn't know when it happens, processing it using a generic way
             // e.g. new event: fs_event=FsEvent { path: "/.docid/16777229/changed/782/src=0,dst=41985052", flag: kFSEventStreamEventFlagNone, id: 471533015 }
             if is_dir {
@@ -82,8 +84,7 @@ impl EventFlag {
             | self.contains(EventFlag::KernelDropped)
         {
             ScanType::Folder
-        } else if self.contains(EventFlag::EventIdsWrapped) | self.contains(EventFlag::HistoryDone)
-        {
+        } else if self.contains(EventFlag::EventIdsWrapped) {
             ScanType::Nop
         } else if self.contains(EventFlag::RootChanged) {
             ScanType::ReScan
