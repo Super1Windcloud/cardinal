@@ -75,7 +75,7 @@ pub fn run() -> Result<()> {
         };
         let mut cache = if let Ok(cached) = SearchCache::try_read_persistent_cache(&path) {
             info!("Loaded existing cache");
-            // If using cache, delay the emit init process to HistoryDone event processing
+            // If using cache, defer the emit init process to HistoryDone event processing
             cached
         } else {
             info!("Walking filesystem...");
