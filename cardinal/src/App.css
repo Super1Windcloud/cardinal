@@ -50,14 +50,50 @@
   overflow-y: auto; /* 保留整体垂直滚动 */
 }
 
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 180px 180px 120px; /* path | modified | created | size */
+  column-gap: 12px;
+  align-items: center;
+}
+
 .row {
   padding: 5px 10px;
   border-bottom: 1px solid #dee2e6;
   box-sizing: border-box;
   white-space: nowrap; /* 防止文本换行 */
-  overflow-x: hidden; /* 禁止水平滚动 */
-  overflow-y: hidden; /* 禁止垂直滚动 */
-  text-overflow: ellipsis; /* 长文本显示省略号 */
+  overflow: hidden; /* 隐藏溢出 */
+}
+
+.row-inner { display: contents; } /* so children align to the grid defined on parent */
+
+.path-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+.mtime-text {
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.mtime-text.muted {
+  opacity: 0.6;
+}
+
+.ctime-text { color: #6c757d; font-size: 0.9em; }
+.size-text { color: #6c757d; font-size: 0.9em; text-align: right; }
+.header-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: inherit;
+  padding: 6px 10px;
+  border-bottom: 1px solid #dee2e6;
+}
+.header { font-weight: 600; color: #495057; }
+
+.virtual-list { height: calc(100% - 40px); }
+
+.ctime-text.muted {
+  opacity: 0.6;
 }
 
 input,
@@ -145,6 +181,8 @@ button {
   .row {
     border-bottom: 1px solid #343a40;
   }
+  .header-row { border-bottom: 1px solid #343a40; }
+  .header { color: #ced4da; }
 
   a:hover {
     color: #0d6efd; /* 统一暗色模式下的高亮色 */

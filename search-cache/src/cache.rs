@@ -247,18 +247,19 @@ impl SearchCache {
     }
 
     /// Get the path of the node in the slab.
-    /// TODO(ldm0): defend non-existing nodes.
-    pub fn node_path(&self, index: usize) -> PathBuf {
+    pub fn node_path(&self, index: usize) -> Option<PathBuf> {
         let mut current = index;
         let mut segments = vec![];
-        while let Some(parent) = self.slab[current].parent {
-            segments.push(self.slab[current].name.clone());
+        while let Some(parent) = self.slab.get(current)?.parent {
+            segments.push(self.slab.get(current)?.name.clone());
             current = parent;
         }
-        self.path
-            .iter()
-            .chain(segments.iter().rev().map(OsStr::new))
-            .collect()
+        Some(
+            self.path
+                .iter()
+                .chain(segments.iter().rev().map(OsStr::new))
+                .collect(),
+        )
     }
 
     fn push_node(&mut self, node: SlabNode) -> usize {
@@ -443,18 +444,38 @@ impl SearchCache {
         self.last_event_id
     }
 
-    pub fn query_files(&self, query: String) -> Result<Vec<SearchNode>> {
-        self.search(&query).map(|nodes| {
-            self.expand_file_nodes(nodes)
-        })
+    pub fn query_files(&mut self, query: String) -> Result<Vec<SearchNode>> {
+        self.search(&query)
+            .map(|nodes| self.expand_file_nodes(nodes))
     }
 
-    pub fn expand_file_nodes(&self, nodes: Vec<usize>) -> Vec<SearchNode> {
+    /// Returns a node info vector with the same length as the input nodes.
+    /// If the given node is not found, an empty SearchNode is returned.
+    pub fn expand_file_nodes(&mut self, nodes: Vec<usize>) -> Vec<SearchNode> {
         nodes
             .into_iter()
-            .map(|node| SearchNode {
-                path: self.node_path(node),
-                metadata: self.slab[node].metadata.clone(),
+            .map(|node| {
+                let path = self.node_path(node);
+                let metadata = self.slab.get_mut(node).and_then(|node| {
+                    if let Some(metadata) = &node.metadata {
+                        Some(metadata.clone())
+                    } else if let Some(path) = &path {
+                        // try fetching metadata if it's not cached and cache them
+                        let metadata = std::fs::metadata(path)
+                            .ok()
+                            .map(NodeMetadata::from)
+                            .as_ref()
+                            .map(SlabNodeMetadata::new);
+                        node.metadata = metadata;
+                        metadata
+                    } else {
+                        None
+                    }
+                });
+                SearchNode {
+                    path: path.unwrap_or_default(),
+                    metadata,
+                }
             })
             .collect()
     }

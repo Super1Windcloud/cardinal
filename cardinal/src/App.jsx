@@ -40,6 +40,14 @@ class LRUCache {
   }
 }
 
+// Format bytes into KB with one decimal place, e.g., 12.3 KB
+function formatKB(bytes) {
+  if (bytes == null) return null;
+  const kb = bytes / 1024;
+  if (!isFinite(kb)) return null;
+  return `${kb.toFixed(kb < 10 ? 1 : 0)} KB`;
+}
+
 function App() {
   const [results, setResults] = useState([]);
   const lruCache = useRef(new LRUCache(1000));
@@ -113,10 +121,46 @@ function App() {
   const rowRenderer = ({ key, index, style }) => {
     const item = lruCache.current.get(index);
     // console.log("rendering row", index, item);
+    const path = typeof item === 'string' ? item : item?.path;
+    // Prefer nested metadata.mtime, but also support top-level mtime if backend changed shape
+    const mtimeSec =
+      typeof item !== 'string'
+        ? (item?.metadata?.mtime ?? item?.mtime)
+        : undefined;
+    const mtimeText =
+      mtimeSec != null ? new Date(mtimeSec * 1000).toLocaleString() : null;
+    const ctimeSec =
+      typeof item !== 'string'
+        ? (item?.metadata?.ctime ?? item?.ctime)
+        : undefined;
+    const ctimeText =
+      ctimeSec != null ? new Date(ctimeSec * 1000).toLocaleString() : null;
+    const sizeBytes =
+      typeof item !== 'string'
+        ? (item?.metadata?.size ?? item?.size)
+        : undefined;
+    const sizeText = formatKB(sizeBytes);
     return (
-      <div key={key} style={style} className="row">
+      <div key={key} style={style} className="row columns">
         {item ? (
-          item
+          <div className="row-inner" title={path}>
+            <span className="path-text">{path}</span>
+            {mtimeText ? (
+              <span className="mtime-text">{mtimeText}</span>
+            ) : (
+              <span className="mtime-text muted">—</span>
+            )}
+            {ctimeText ? (
+              <span className="ctime-text">{ctimeText}</span>
+            ) : (
+              <span className="ctime-text muted">—</span>
+            )}
+            {sizeText ? (
+              <span className="size-text">{sizeText}</span>
+            ) : (
+              <span className="size-text muted">—</span>
+            )}
+          </div>
         ) : (
           <div/>
         )}
@@ -138,6 +182,13 @@ function App() {
         />
       </div>
       <div className="results-container" style={{ flex: 1 }}>
+        <div className="header-row columns">
+          <span className="path-text header">Path</span>
+          <span className="mtime-text header">Modified</span>
+          <span className="ctime-text header">Created</span>
+          <span className="size-text header">Size</span>
+        </div>
+        <div className="virtual-list" style={{ flex: 1 }}>
         <InfiniteLoader
           ref={infiniteLoaderRef}
           isRowLoaded={isRowLoaded}
@@ -160,6 +211,7 @@ function App() {
             </AutoSizer>
           )}
         </InfiniteLoader>
+        </div>
       </div>
       {isStatusBarVisible && (
         <div className={`status-bar ${isInitialized ? 'fade-out' : ''}`}>

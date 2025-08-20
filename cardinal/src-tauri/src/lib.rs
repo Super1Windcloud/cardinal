@@ -2,7 +2,8 @@
 use anyhow::{Context, Result};
 use cardinal_sdk::{EventFlag, EventWatcher};
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
-use search_cache::{HandleFSEError, SearchCache, SearchNode, WalkData};
+use search_cache::{HandleFSEError, SearchCache, SearchNode, SlabNodeMetadata, WalkData};
+use serde::Serialize;
 use std::{
     cell::LazyCell,
     path::PathBuf,
@@ -42,11 +43,17 @@ async fn search(query: String, state: State<'_, SearchState>) -> Result<Vec<usiz
     search_result.map_err(|e| format!("Failed to process search result: {:?}", e))
 }
 
+#[derive(Serialize)]
+struct NodeInfo {
+    path: String,
+    metadata: Option<SlabNodeMetadata>,
+}
+
 #[tauri::command]
 async fn get_nodes_info(
     results: Vec<usize>,
     state: State<'_, SearchState>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<NodeInfo>, String> {
     state
         .node_info_tx
         .send(results)
@@ -55,10 +62,12 @@ async fn get_nodes_info(
     let node_info_results = state
         .node_info_results_rx
         .recv()
-        .map(|nodes| {
-            nodes
-                .into_iter()
-                .map(|n| n.path.to_string_lossy().into_owned())
+        .map(|x| {
+            x.into_iter()
+                .map(|SearchNode { path, metadata }| NodeInfo {
+                    path: path.to_string_lossy().into_owned(),
+                    metadata,
+                })
                 .collect()
         })
         .map_err(|e| format!("Failed to receive node info results: {:?}", e))?;
