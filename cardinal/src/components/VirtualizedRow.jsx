@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatKB } from '../utils/format';
+import { MiddleEllipsis } from './MiddleEllipsis';
 
 export function VirtualizedRow({ item, index, style }) {
   const path = typeof item === 'string' ? item : item?.path;
@@ -17,8 +18,8 @@ export function VirtualizedRow({ item, index, style }) {
     >
       {item ? (
         <div className="columns row-inner" title={path}>
-          <span className="filename-text">{filename}</span>
-          <span className="path-text">{path}</span>
+          <MiddleEllipsis className="filename-text" text={filename} />
+          <MiddleEllipsis className="path-text" text={path} />
           {mtimeText ? (
             <span className="mtime-text">{mtimeText}</span>
           ) : (
