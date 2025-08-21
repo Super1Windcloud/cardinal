@@ -8,13 +8,16 @@
     - 标准的 scroll bar 没有实现这个，只能用假 scroll bar 了 https://github.com/yairEO/fakescroll/blob/master/react.fakescroll.js
 - web 传 view-top view-bottom 的两个浮点数进来
 - cardinal：增加状态栏：扫描了多少个文件，处理了多少个 fsevent
-- 只传 slab index 进来，然后渲染是 lazy 的比较合适
-- 增加 fsevent path merger: 
-    - /app/good + /app/good/Cargo.toml == /app/good
-    - /app/good/aaa.txt + /app/good/aaa.txt == /app/good/aaa.txt
-- 正则搜索
+- 目前 fsevent 处理慢:
+    - 并行化 fsevent 的fs遍历部分，写数据部分抢锁
+    - 增加 fsevent path merger: 
+        - /app/good + /app/good/Cargo.toml == /app/good
+        - /app/good/aaa.txt + /app/good/aaa.txt == /app/good/aaa.txt
+- 支持普通搜索，正则搜索, glob search
+    - 不同的格式有开关按钮，类似于 vscode
+    - 在输入不同的内容的时候自动推断是 glob 还是正则还是普通 substr 搜索，然后对应的按钮变成浅色
+        - 用户可以手动勾选对应的模式按钮，变成深色
 - 搜索结果自动更新
-- namepool 并行搜索
 
 ```bash
 npm run tauri dev -- --release
