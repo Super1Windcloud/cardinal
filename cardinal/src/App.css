@@ -1,27 +1,4 @@
-/* 悬浮横向滚动条容器 */
-.horizontal-scrollbar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 7px;
-  z-index: 11;
-  pointer-events: none;
-}
-
-.horizontal-scrollbar-inner {
-  position: absolute;
-  height: 7px;
-  background: var(--color-scrollbar);
-  border-radius: 6px;
-  box-shadow: 0 0 2px 0 rgba(0,0,0,0.10);
-  transition: background 0.5s;
-  pointer-events: auto;
-  cursor: pointer;
-}
-.horizontal-scrollbar-inner:hover {
-  background: var(--color-scrollbar-hover);
-}
+/* 使用系统原生滚动条，无需自定义横向滚动条 */
 /* === Base & Theme Tokens === */
 
 :root {
@@ -43,8 +20,7 @@
   --row-even: #ffffff;
   --row-odd: #f7f8fa;
   --row-hover: rgb(220, 220, 220);
-  --color-scrollbar: rgba(0, 0, 0, 0.4);
-  --color-scrollbar-hover: rgba(0, 0, 0, 0.5);
+  /* 去除自定义滚动条颜色变量 */
 
   color: var(--color-text);
   background-color: var(--color-bg);
@@ -55,6 +31,14 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+
+  /* Layout tokens */
+  --row-height: 24px;                /* 与虚拟列表 rowHeight 同步 */
+  --col-gap: 12px;                   /* 列之间的间隙 */
+  --columns-extra: 20px;             /* 额外宽度补偿，需与JS columnsTotal 一致 */
+  --col-min-width: 80px;             /* 列宽最小值 */
+  --col-max-width: 1200px;           /* 列宽最大值 */
+  /* 去除自定义滚动条相关变量 */
 }
 
 /* === Global Resets === */
@@ -67,12 +51,7 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Allow inner scroll containers to handle horizontal/vertical scroll normally. */
-/* We only prevent window-level rubber-band on html/body above. */
-*::before,
-*::after {
-  -webkit-overflow-scrolling: auto;
-}
+/* 允许内部容器滚动 */
 
 /* === Layout: App Container === */
 #root,
@@ -145,54 +124,29 @@ button:active {
   height: 100%;
   position: relative;
   /* 允许内部绝对定位竖直滚动条 */
-  --col-gap: 12px;
-  --columns-total: calc(var(--w-filename, 240px) + var(--w-path, 600px) + var(--w-modified, 180px) + var(--w-created, 180px) + var(--w-size, 120px) + (4 * var(--col-gap)) + 20px);
+  --columns-total: calc(
+    var(--w-filename, 240px)
+    + var(--w-path, 600px)
+    + var(--w-modified, 180px)
+    + var(--w-created, 180px)
+    + var(--w-size, 120px)
+    + (4 * var(--col-gap))
+    + var(--columns-extra)
+  );
 }
 
-/* 横向滚动区域，隐藏竖直滚动条 */
 .scroll-area {
   overflow-x: auto;
-  overflow-y: hidden !important;
+  overflow-y: auto;
   height: 100%;
   display: flex;
   flex-direction: column;
   /* 让横向滚动条属于scroll-area */
 }
 
-.scroll-area::-webkit-scrollbar {
-  display: none;
-}
+/* 不再隐藏原生滚动条 */
 
-/* 悬浮竖直滚动条 */
-.vertical-scrollbar {
-  position: absolute;
-  top: 37px; /* header高度，需与JS同步 32px + 2px * 2 */
-  right: 0;
-  width: 7px;
-  height: calc(100% - 37px);
-  background: transparent;
-  z-index: 10;
-  display: flex;
-  align-items: flex-start;
-  pointer-events: none; /* 让滚动条本身不拦截事件，实际滚动靠JS同步 */
-}
-
-.vertical-scrollbar-inner {
-  width: 7px;
-  border-radius: 6px;
-  /* 255 * x + 32 * (1 - x) = 150   =>   x = 0.41114 */
-  background: var(--color-scrollbar);
-  box-shadow: 0 0 2px 0 rgba(0,0,0,0.10);
-  transition: background 0.5s;
-  pointer-events: auto;
-  cursor: pointer;
-}
-
-/* 鼠标悬停时略微加深 */
-.vertical-scrollbar-inner:hover {
-  /* 255 * x + 32 * (1 - x) = 157   =>   x = 0.43554 */
-  background: var(--color-scrollbar-hover);
-}
+/* 去除自定义悬浮竖直滚动条 */
 
 /* === Columns (Grid) === */
 .columns {
@@ -273,14 +227,9 @@ button:active {
   display: none;
 }
 
-/* Let wrapper control horizontal scroll; List keeps vertical scroll only */
+/* 让虚拟列表使用原生滚动条 */
 .ReactVirtualized__Grid {
-  overflow-x: visible !important;
-  overflow-y: scroll !important;
-  scrollbar-width: none !important; /* Firefox */
-}
-.ReactVirtualized__Grid::-webkit-scrollbar {
-  display: none !important;
+  overflow: auto !important;
 }
 
 /* Rows (rendered inside virtual list) */

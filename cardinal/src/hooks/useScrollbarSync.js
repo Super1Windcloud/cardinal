@@ -8,7 +8,9 @@ export function useScrollbarSync({ listRef, scrollAreaRef, results, colWidths, s
       const grid = listRef.current.Grid || listRef.current;
       const scroller = grid && grid._scrollingContainer ? grid._scrollingContainer : null;
       const totalRows = results.length;
-      const rowHeight = 24;
+      // 从 CSS 变量获取行高
+      const rootStyle = getComputedStyle(document.documentElement);
+      const rowHeight = parseInt(rootStyle.getPropertyValue('--row-height')) || 24;
       const visibleHeight = grid.props.height;
       const totalHeight = totalRows * rowHeight;
       // Visual track height from DOM: scroll area clientHeight - header height
@@ -36,8 +38,9 @@ export function useScrollbarSync({ listRef, scrollAreaRef, results, colWidths, s
         return;
       }
       // VS Code-like mapping using real track height and DOM scroll metrics
-      // Thumb size T ≈ max(32, trackHeight * (domClientH / domScrollH))
-      const barHeight = Math.max(32, trackHeight * (domClientH / Math.max(1, domScrollH)));
+      // Thumb size T ≈ max(cssVar, trackHeight * (domClientH / domScrollH))
+      const thumbMin = parseInt(rootStyle.getPropertyValue('--scrollbar-thumb-min')) || 32;
+      const barHeight = Math.max(thumbMin, trackHeight * (domClientH / Math.max(1, domScrollH)));
       const maxContentScroll = Math.max(1, domScrollH - domClientH);
       const maxTrack = Math.max(0, trackHeight - barHeight);
       const ratio = scrollTop / maxContentScroll;
@@ -72,7 +75,9 @@ export function useScrollbarSync({ listRef, scrollAreaRef, results, colWidths, s
         return;
       }
       // VS Code-like mapping: content [0, scrollWidth - clientWidth] -> track [0, clientWidth - barWidth]
-      const barWidth = Math.max(32, (clientWidth * clientWidth) / scrollWidth);
+      const rootStyle2 = getComputedStyle(document.documentElement);
+      const thumbMin2 = parseInt(rootStyle2.getPropertyValue('--scrollbar-thumb-min')) || 32;
+      const barWidth = Math.max(thumbMin2, (clientWidth * clientWidth) / scrollWidth);
       const maxContentScrollX = Math.max(1, scrollWidth - clientWidth);
       const maxTrackX = Math.max(0, clientWidth - barWidth);
       const ratioX = scrollLeft / maxContentScrollX;
