@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-// Render text with a middle ellipsis that fits the available width of its grid cell.
+const CHAR_WIDTH = 8; // approximate character width in pixels
+
 export function MiddleEllipsis({ text, className }) {
   const containerRef = useRef(null);
   const [display, setDisplay] = useState(text || '');
 
   useEffect(() => {
-    function compute() {
+    const computeDisplay = () => {
       const el = containerRef.current;
       if (!el) return;
       
@@ -16,10 +17,8 @@ export function MiddleEllipsis({ text, className }) {
         return;
       }
 
-      // Simple character-based estimation
       const containerWidth = el.getBoundingClientRect().width;
-      const charWidth = 8; // approximate character width in pixels
-      const maxChars = Math.floor(containerWidth / charWidth) - 1; // -1 for ellipsis
+      const maxChars = Math.floor(containerWidth / CHAR_WIDTH) - 1; // -1 for ellipsis
 
       if (str.length <= maxChars) {
         setDisplay(str);
@@ -38,13 +37,15 @@ export function MiddleEllipsis({ text, className }) {
       const leftStr = str.slice(0, leftChars);
       const rightStr = str.slice(str.length - rightChars);
       setDisplay(`${leftStr}…${rightStr}`);
-    }
+    };
 
-    compute();
-    const ro = new ResizeObserver(() => compute());
+    computeDisplay();
+    
+    const resizeObserver = new ResizeObserver(computeDisplay);
     const el = containerRef.current;
-    if (el) ro.observe(el);
-    return () => ro.disconnect();
+    if (el) resizeObserver.observe(el);
+    
+    return () => resizeObserver.disconnect();
   }, [text]);
 
   return (
