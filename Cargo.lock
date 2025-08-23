@@ -575,6 +575,7 @@ dependencies = [
  "memchr",
  "rayon",
  "serde",
+ "tempdir",
 ]
 
 [[package]]

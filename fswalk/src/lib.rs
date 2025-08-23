@@ -195,3 +195,127 @@ fn walk(path: &Path, walk_data: &WalkData) -> Option<Node> {
 fn handle_error_and_retry(failed: &Error) -> bool {
     failed.kind() == std::io::ErrorKind::Interrupted
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, io::Write};
+    use tempdir::TempDir;
+
+    #[test]
+    fn test_walk_simple_tree_without_metadata() {
+        let tmp = TempDir::new("fswalk_simple").unwrap();
+        let root = tmp.path();
+        fs::create_dir(root.join("dir_a")).unwrap();
+        fs::File::create(root.join("file_a.txt")).unwrap();
+        fs::File::create(root.join("dir_a/file_b.log")).unwrap();
+        let walk_data = WalkData::new(PathBuf::from("/ignore/this"), false);
+        let node = walk_it(root, &walk_data).unwrap();
+        assert_eq!(node.name, root.file_name().unwrap().to_string_lossy());
+        // Root + dir + 2 files
+        let mut counts = (0, 0);
+        fn traverse(n: &Node, counts: &mut (usize, usize)) {
+            if n.children.is_empty() {
+                counts.0 += 1;
+            } else {
+                counts.1 += 1;
+            }
+            for c in &n.children {
+                traverse(c, counts);
+            }
+        }
+        traverse(&node, &mut counts);
+        assert_eq!(counts.0 + counts.1, 4);
+        // Metadata for files should be None (walk_data.need_metadata = false)
+        fn assert_no_file_metadata(n: &Node) {
+            if n.children.is_empty() {
+                assert!(
+                    n.metadata.is_none(),
+                    "file node metadata should be None when not requested: {:?}",
+                    n.name
+                );
+            } else {
+                // directory metadata may be Some (free metadata) but it's optional; ensure type correctness when present
+                if let Some(m) = n.metadata {
+                    assert!(matches!(m.r#type, NodeFileType::Dir));
+                }
+                for c in &n.children {
+                    assert_no_file_metadata(c);
+                }
+            }
+        }
+        assert_no_file_metadata(&node);
+    }
+
+    #[test]
+    fn test_walk_with_metadata_enabled() {
+        let tmp = TempDir::new("fswalk_meta").unwrap();
+        let root = tmp.path();
+        fs::File::create(root.join("meta_file.txt")).unwrap();
+        let walk_data = WalkData::new(PathBuf::from("/ignore/this"), true);
+        let node = walk_it(root, &walk_data).unwrap();
+        fn find<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
+            if node.name == name {
+                return Some(node);
+            }
+            for c in &node.children {
+                if let Some(n) = find(c, name) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+        let file_node = find(&node, "meta_file.txt").unwrap();
+        assert!(matches!(
+            file_node.metadata.map(|m| m.r#type),
+            Some(NodeFileType::File)
+        ));
+    }
+
+    #[test]
+    fn test_symlink_not_traversed() {
+        let tmp = TempDir::new("fswalk_symlink").unwrap();
+        let root = tmp.path();
+        fs::create_dir(root.join("real_dir")).unwrap();
+        fs::File::create(root.join("real_dir/file.txt")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("real_dir"), root.join("link_dir")).unwrap();
+        let walk_data = WalkData::new(PathBuf::from("/ignore/this"), true);
+        let node = walk_it(root, &walk_data).unwrap();
+        // Ensure link_dir exists as a file system entry but not traversed (should be a file node with no children)
+        fn get_child<'a>(n: &'a Node, name: &str) -> Option<&'a Node> {
+            n.children.iter().find(|c| c.name == name)
+        }
+        let link = get_child(&node, "link_dir").unwrap();
+        assert!(
+            link.children.is_empty(),
+            "symlink directory should not be traversed"
+        );
+    }
+
+    #[test]
+    fn test_handle_error_and_retry_only_interrupted() {
+        let interrupted = Error::from(ErrorKind::Interrupted);
+        assert!(handle_error_and_retry(&interrupted));
+        let not_found = Error::from(ErrorKind::NotFound);
+        assert!(!handle_error_and_retry(&not_found));
+    }
+
+    #[test]
+    fn test_large_number_of_files_counts() {
+        let tmp = TempDir::new("fswalk_many").unwrap();
+        let root = tmp.path();
+        for i in 0..50u32 {
+            let mut f = fs::File::create(root.join(format!("f{i}.txt"))).unwrap();
+            writeln!(f, "hello {i}").unwrap();
+        }
+        let walk_data = WalkData::new(PathBuf::from("/ignore/this"), false);
+        let node = walk_it(root, &walk_data).unwrap();
+        // Expect 1 (root) + 50 file children
+        assert_eq!(
+            node.children.len(),
+            50,
+            "expected 50 files directly under root"
+        );
+    }
+}
