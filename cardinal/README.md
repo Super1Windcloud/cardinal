@@ -16,7 +16,7 @@
     - 在输入不同的内容的时候自动推断是 glob 还是正则还是普通 substr 搜索，然后对应的按钮变成浅色
         - 用户可以手动勾选对应的模式按钮，变成深色
 - 搜索结果自动更新
-- 搜索结果path中query部分高亮
+- 搜索结果path中query部分高亮(优化成Rust实现返回matched part)
 
 ```bash
 npm run tauri dev -- --release
