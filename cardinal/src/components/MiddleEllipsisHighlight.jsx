@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 
 const CHAR_WIDTH = 8; // approximate character width in pixels
 
-function splitTextWithHighlight(text, searchQuery) {
+export function splitTextWithHighlight(text, searchQuery) {
   if (!searchQuery) return [{ text, isHighlight: false }];
   
   const parts = [];

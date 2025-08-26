@@ -1,5 +1,5 @@
 import React from 'react';
-import { MiddleEllipsisHighlight } from './MiddleEllipsisHighlight';
+import { MiddleEllipsisHighlight, splitTextWithHighlight } from './MiddleEllipsisHighlight';
 import { formatKB } from '../utils/format';
 
 export function FileRow({ item, rowIndex, style, onContextMenu, searchQuery }) {
@@ -41,7 +41,12 @@ export function FileRow({ item, rowIndex, style, onContextMenu, searchQuery }) {
   <div style={style} className={`row ${rowIndex % 2 === 0 ? 'row-even' : 'row-odd'}`} onContextMenu={handleContextMenu}>
       <div className="columns row-inner" title={path}>
         <MiddleEllipsisHighlight className="filename-text" text={filename} searchQuery={searchQuery} />
-        <MiddleEllipsisHighlight className="path-text" text={path} searchQuery={searchQuery} />
+        {/* Path 列使用默认右侧截断（CSS text-overflow: ellipsis），保持高亮 */}
+        <span className="path-text" title={path}>
+          {splitTextWithHighlight(path || '', searchQuery).map((part, i) => (
+            part.isHighlight ? <strong key={i}>{part.text}</strong> : <span key={i}>{part.text}</span>
+          ))}
+        </span>
     <span className={`size-text ${!sizeText ? 'muted' : ''}`}>{sizeText || '—'}</span>
     <span className={`mtime-text ${!mtimeText ? 'muted' : ''}`}>{mtimeText || '—'}</span>
     <span className={`ctime-text ${!ctimeText ? 'muted' : ''}`}>{ctimeText || '—'}</span>
