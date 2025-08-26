@@ -419,25 +419,6 @@ button:active {
   opacity: 0.6;
 }
 
-/* Loading state styles */
-.row.loading {
-  opacity: 0.7;
-}
-
-.loading-text {
-  color: var(--color-muted);
-  font-style: italic;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
-}
 
 /* Search placeholder styles */
 .search-placeholder {
