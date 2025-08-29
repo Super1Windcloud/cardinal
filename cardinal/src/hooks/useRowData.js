@@ -49,17 +49,7 @@ export function useRowData(results) {
   }, [results, cache]);
 
   const getItem = useCallback((index) => {
-    const cached = cache.get(index);
-    if (cached) return cached;
-    
-    // 如果没有缓存且不在加载中，触发加载
-    if (!loadingRef.current.has(index)) {
-      const batchStart = Math.max(0, index - 5);
-      const batchEnd = Math.min(results.length - 1, index + 15);
-      ensureRangeLoaded(batchStart, batchEnd);
-    }
-    
-    return null; // 返回 null 让 FileRow 显示加载状态
+    return cache.get(index);
   }, [cache, results, ensureRangeLoaded]);
 
   return { getItem, ensureRangeLoaded };
