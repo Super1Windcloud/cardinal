@@ -10,6 +10,8 @@ export function FileRow({ item, rowIndex, style, onContextMenu, searchQuery }) {
 
   const path = typeof item === 'string' ? item : item?.path;
   const filename = path ? path.split(/[\\/]/).pop() : '';
+  // 获取不包含文件名的目录路径
+  const directoryPath = path ? path.split(/[\\/]/).slice(0, -1).join('/') : '';
 
   const mtimeSec = typeof item !== 'string' ? (item?.metadata?.mtime ?? item?.mtime) : undefined;
   const mtimeText = mtimeSec != null ? new Date(mtimeSec * 1000).toLocaleString() : null;
@@ -31,9 +33,9 @@ export function FileRow({ item, rowIndex, style, onContextMenu, searchQuery }) {
     <div style={style} className={`row ${rowIndex % 2 === 0 ? 'row-even' : 'row-odd'}`} onContextMenu={handleContextMenu}>
       <div className="columns row-inner" title={path}>
         <MiddleEllipsisHighlight className="filename-text" text={filename} searchQuery={searchQuery} />
-        {/* Path 列使用默认右侧截断（CSS text-overflow: ellipsis），保持高亮 */}
-        <span className="path-text" title={path}>
-          {splitTextWithHighlight(path || '', searchQuery).map((part, i) => (
+        {/* Path 列显示目录路径（不包含文件名） */}
+        <span className="path-text" title={directoryPath}>
+          {splitTextWithHighlight(directoryPath || '', searchQuery).map((part, i) => (
             part.isHighlight ? <strong key={i}>{part.text}</strong> : <span key={i}>{part.text}</span>
           ))}
         </span>
