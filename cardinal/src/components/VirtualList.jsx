@@ -60,25 +60,20 @@ export const VirtualList = forwardRef(function VirtualList({
 
 	// 移除滚动条显示/隐藏逻辑，滚动条将始终可见（当需要时）
 
-	// 更新滚动条外观
+	// 简化的滚动条更新
 	const updateScrollbar = useCallback((scrollTop) => {
 		const track = scrollTrackRef.current;
 		const thumb = scrollThumbRef.current;
 		
-		if (!track || !thumb) return;
-		
-		const trackHeight = track.clientHeight;
-		const shouldShow = totalHeight > viewportHeight && trackHeight > 0;
-		
-		if (!shouldShow) {
-			thumb.style.display = 'none';
+		if (!track || !thumb || totalHeight <= viewportHeight) {
+			if (thumb) thumb.style.display = 'none';
 			return;
 		}
 		
 		thumb.style.display = 'block';
+		const trackHeight = track.clientHeight;
 		const thumbHeight = Math.max(SCROLLBAR_THUMB_MIN, (viewportHeight / totalHeight) * trackHeight);
-		const scrollRatio = scrollTop / maxScrollTop;
-		const thumbTop = scrollRatio * (trackHeight - thumbHeight);
+		const thumbTop = maxScrollTop > 0 ? (scrollTop / maxScrollTop) * (trackHeight - thumbHeight) : 0;
 		
 		thumb.style.height = `${thumbHeight}px`;
 		thumb.style.transform = `translateY(${thumbTop}px)`;
