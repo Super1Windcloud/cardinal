@@ -568,7 +568,7 @@ button:active {
   overflow: hidden;
 }
 
-/* 虚拟滚动条样式 - Safari 原生风格 (overlay + auto-hide) */
+/* 虚拟滚动条样式 - Safari 原生风格 (始终可见) */
 .virtual-scrollbar {
   width: 14px; /* 对齐 JS SCROLLBAR_WIDTH */
   position: relative;
@@ -580,14 +580,8 @@ button:active {
   -webkit-user-select: none;
   contain: layout paint;
   transition: opacity .25s ease;
-  opacity: 0; /* 默认隐藏 */
-  pointer-events: none; /* 隐藏时不响应事件 */
-}
-
-/* 外层容器在交互中添加 show-scrollbar 类显示 */
-.virtual-list.show-scrollbar .virtual-scrollbar {
-  opacity: 1;
-  pointer-events: auto;
+  opacity: 1; /* 始终可见 */
+  pointer-events: auto; /* 始终响应事件 */
 }
 
 .virtual-scrollbar-track {

@@ -24,10 +24,6 @@ export const VirtualList = forwardRef(function VirtualList({
 	const scrollTrackRef = useRef(null);
 	const scrollThumbRef = useRef(null);
 	const isDraggingRef = useRef(false);
-	const hideTimerRef = useRef(null);
-
-	// 自动隐藏滚动条的延迟（ms）
-	const HIDE_DELAY = 900;
 	const lastScrollLeftRef = useRef(0);
 	
 	const [scrollTop, setScrollTop] = useState(0);
@@ -62,22 +58,7 @@ export const VirtualList = forwardRef(function VirtualList({
 		});
 	}, [onRangeChange, rowCount]);
 
-	// 滚动条显示/隐藏辅助函数
-	const showScrollbar = useCallback(() => {
-		const el = containerRef.current;
-		if (!el) return;
-		el.classList.add('show-scrollbar');
-		if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-	}, []);
-
-	const scheduleHideScrollbar = useCallback(() => {
-		if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-		hideTimerRef.current = setTimeout(() => {
-			if (!isDraggingRef.current) {
-				containerRef.current?.classList.remove('show-scrollbar');
-			}
-		}, HIDE_DELAY);
-	}, []);
+	// 移除滚动条显示/隐藏逻辑，滚动条将始终可见（当需要时）
 
 	// 更新滚动条外观
 	const updateScrollbar = useCallback((scrollTop) => {
@@ -114,10 +95,8 @@ export const VirtualList = forwardRef(function VirtualList({
 	// 事件处理函数
 	const handleWheel = useCallback((e) => {
 		e.preventDefault();
-		showScrollbar();
-		scheduleHideScrollbar();
 		updateScrollAndRange(scrollTop + e.deltaY);
-	}, [scrollTop, updateScrollAndRange, showScrollbar, scheduleHideScrollbar]);
+	}, [scrollTop, updateScrollAndRange]);
 
 	const handleHorizontalScroll = useCallback((e) => {
 		const scrollLeft = e.target.scrollLeft;
@@ -138,7 +117,6 @@ export const VirtualList = forwardRef(function VirtualList({
 
 		// 添加拖拽状态样式（使 track 始终保持 hover 高亮）
 		track.classList.add('is-dragging');
-		showScrollbar();
 		
 		const trackRect = track.getBoundingClientRect();
 		const thumbRect = thumb.getBoundingClientRect();
@@ -167,14 +145,13 @@ export const VirtualList = forwardRef(function VirtualList({
 			isDraggingRef.current = false;
 			// 移除拖拽状态样式
 			track.classList.remove('is-dragging');
-			scheduleHideScrollbar();
 			document.removeEventListener('mousemove', handleMouseMove);
 			document.removeEventListener('mouseup', handleMouseUp);
 		};
 		
 		document.addEventListener('mousemove', handleMouseMove);
 		document.addEventListener('mouseup', handleMouseUp);
-	}, [maxScrollTop, updateScrollAndRange, showScrollbar, scheduleHideScrollbar]);
+	}, [maxScrollTop, updateScrollAndRange]);
 
 	const handleTrackClick = useCallback((e) => {
 		if (e.target === scrollThumbRef.current) return;
@@ -265,11 +242,7 @@ export const VirtualList = forwardRef(function VirtualList({
 			</div>
 			
 			{/* 虚拟滚动条 */}
-			<div 
-				className="virtual-scrollbar"
-				onMouseEnter={showScrollbar}
-				onMouseLeave={() => { if (!isDraggingRef.current) scheduleHideScrollbar(); }}
-			>
+			<div className="virtual-scrollbar">
 				<div
 					ref={scrollTrackRef}
 					className="virtual-scrollbar-track"
