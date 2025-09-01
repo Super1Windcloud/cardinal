@@ -4,7 +4,7 @@ import { ContextMenu } from './components/ContextMenu';
 import { ColumnHeader } from './components/ColumnHeader';
 import { FileRow } from './components/FileRow';
 import StatusBar from './components/StatusBar';
-import { useAppState, useSearch, useRowData } from './hooks';
+import { useAppState, useSearch } from './hooks';
 import { useColumnResize } from './hooks/useColumnResize';
 import { useContextMenu } from './hooks/useContextMenu';
 import { ROW_HEIGHT, OVERSCAN_ROW_COUNT } from './constants';
@@ -14,7 +14,6 @@ import { StateDisplay } from './components/StateDisplay';
 function App() {
   const { results, setResults, isInitialized, scannedFiles, processedEvents } = useAppState();
   const { colWidths, onResizeStart, autoFitColumns } = useColumnResize();
-  const { getItem, ensureRangeLoaded } = useRowData(results);
   const {
     menu, showContextMenu, showHeaderContextMenu, closeMenu, getMenuItems
   } = useContextMenu(autoFitColumns);
@@ -28,23 +27,21 @@ function App() {
 
   // 优化的搜索结果处理逻辑（保持使用 useRef，但简化其他逻辑）
   useEffect(() => {
-    if (results.length === 0) return; // 提前返回，减少嵌套
+    if (results.length === 0) return;
     const isNewQuery = prevQueryRef.current !== currentQuery;
     const wasEmpty = prevResultsLenRef.current === 0;
 
-    // 新查询时滚动到顶部
     if (isNewQuery && virtualListRef.current) {
       virtualListRef.current.scrollToTop();
     }
 
-    // 预加载首屏数据（简化预加载逻辑）
-    if (isNewQuery || wasEmpty) {
-      const preloadCount = Math.min(30, results.length); // 简化为固定预加载30行
-      ensureRangeLoaded(0, preloadCount - 1);
+    if ((isNewQuery || wasEmpty) && virtualListRef.current?.ensureRangeLoaded) {
+      const preloadCount = Math.min(30, results.length);
+      virtualListRef.current.ensureRangeLoaded(0, preloadCount - 1);
     }
     prevQueryRef.current = currentQuery;
     prevResultsLenRef.current = results.length;
-  }, [results, currentQuery, ensureRangeLoaded]);
+  }, [results, currentQuery]);
 
   // 滚动同步处理 - 单向同步版本（Grid -> Header）
   const handleHorizontalSync = useCallback((scrollLeft) => {
@@ -52,19 +49,16 @@ function App() {
   }, []);
 
   // 单元格渲染
-  const renderRow = (rowIndex, rowStyle) => {
-    const item = getItem(rowIndex);
-    return (
-      <FileRow
-        key={rowIndex}
-        item={item}
-        rowIndex={rowIndex}
-        style={{ ...rowStyle, width: 'var(--columns-total)' }}
-        onContextMenu={showContextMenu}
-        searchQuery={currentQuery}
-      />
-    );
-  };
+  const renderRow = (rowIndex, item, rowStyle) => (
+    <FileRow
+      key={rowIndex}
+      item={item}
+      rowIndex={rowIndex}
+      style={{ ...rowStyle, width: 'var(--columns-total)' }}
+      onContextMenu={showContextMenu}
+      searchQuery={currentQuery}
+    />
+  );
 
   const getDisplayState = () => {
     if (showLoadingUI || !initialFetchCompleted) return 'loading';
@@ -110,11 +104,10 @@ function App() {
             ) : (
               <VirtualList
                 ref={virtualListRef}
-                rowCount={results.length}
+                results={results}
                 rowHeight={ROW_HEIGHT}
                 overscan={OVERSCAN_ROW_COUNT}
                 renderRow={renderRow}
-                onRangeChange={ensureRangeLoaded}
                 onScrollSync={handleHorizontalSync}
                 className="virtual-list"
               />

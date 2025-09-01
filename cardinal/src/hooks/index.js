@@ -119,6 +119,5 @@ export function useSearch(setResults) {
   return { onQueryChange, currentQuery, showLoadingUI, initialFetchCompleted, durationMs, resultCount, searchError };
 }
 
-export { useRowData } from './useRowData';
 export { useColumnResize } from './useColumnResize';
 export { useContextMenu } from './useContextMenu';

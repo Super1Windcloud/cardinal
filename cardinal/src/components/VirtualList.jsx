@@ -1,5 +1,6 @@
 import React, { useRef, useState, useCallback, useLayoutEffect, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { SCROLLBAR_THUMB_MIN } from '../constants';
+import { invoke } from '@tauri-apps/api/core';
 
 /**
  * 虚拟滚动列表组件
@@ -11,7 +12,9 @@ import { SCROLLBAR_THUMB_MIN } from '../constants';
  * - 水平滚动同步
  */
 export const VirtualList = forwardRef(function VirtualList({
-	rowCount = 0,
+	// 若传入 results，则 rowCount 可省略
+	results = null,
+	rowCount: explicitRowCount = 0,
 	rowHeight = 24,
 	overscan = 5,
 	renderRow,
@@ -25,17 +28,28 @@ export const VirtualList = forwardRef(function VirtualList({
 	const scrollThumbRef = useRef(null);
 	const isDraggingRef = useRef(false);
 	const lastScrollLeftRef = useRef(0);
-	
+	const [cache, setCache] = useState(() => new Map());
+	const loadingRef = useRef(new Set());
+
+	// 结果集变化时重置缓存
+	useEffect(() => {
+		setCache(new Map());
+		loadingRef.current.clear();
+	}, [results]);
+
 	const [scrollTop, setScrollTop] = useState(0);
 	const [viewportHeight, setViewportHeight] = useState(0);
 	const [range, setRange] = useState({ start: 0, end: -1 });
+
+	// 统一行数（优先使用 results.length）
+	const rowCount = results ? results.length : explicitRowCount;
 
 	// 计算总虚拟高度和滚动范围
 	const { totalHeight, maxScrollTop } = useMemo(() => ({
 		totalHeight: rowCount * rowHeight,
 		maxScrollTop: Math.max(0, rowCount * rowHeight - viewportHeight)
 	}), [rowCount, rowHeight, viewportHeight]);
-	
+
 	// 计算可见范围
 	const computeRange = useCallback((currentScrollTop, vh) => {
 		if (!rowCount || !vh) return { start: 0, end: -1 };
@@ -58,23 +72,56 @@ export const VirtualList = forwardRef(function VirtualList({
 		});
 	}, [onRangeChange, rowCount]);
 
+	// 内置行数据加载（原 useRowData.ensureRangeLoaded）
+	const ensureRangeLoaded = useCallback(async (start, end) => {
+		if (!results || start < 0 || end < start || rowCount === 0) return;
+		const needLoading = [];
+		for (let i = start; i <= end; i++) {
+			if (!cache.has(i) && !loadingRef.current.has(i)) {
+				needLoading.push(i);
+				loadingRef.current.add(i);
+			}
+		}
+		if (needLoading.length === 0) return;
+		try {
+			const slice = needLoading.map(i => results[i]);
+			const fetched = await invoke('get_nodes_info', { results: slice });
+			setCache(prev => {
+				const newCache = new Map(prev);
+				needLoading.forEach((originalIndex, idx) => {
+					newCache.set(originalIndex, fetched[idx]);
+					loadingRef.current.delete(originalIndex);
+				});
+				return newCache;
+			});
+		} catch (err) {
+			needLoading.forEach(i => loadingRef.current.delete(i));
+			console.error('Failed loading rows', err);
+		}
+	}, [results, rowCount, cache]);
+
+	// range 变化时自动加载
+	useEffect(() => {
+		if (range.end >= range.start) ensureRangeLoaded(range.start, range.end);
+	}, [range, ensureRangeLoaded]);
+
 	// 移除滚动条显示/隐藏逻辑，滚动条将始终可见（当需要时）
 
 	// 简化的滚动条更新
 	const updateScrollbar = useCallback((scrollTop) => {
 		const track = scrollTrackRef.current;
 		const thumb = scrollThumbRef.current;
-		
+
 		if (!track || !thumb || totalHeight <= viewportHeight) {
 			if (thumb) thumb.style.display = 'none';
 			return;
 		}
-		
+
 		thumb.style.display = 'block';
 		const trackHeight = track.clientHeight;
 		const thumbHeight = Math.max(SCROLLBAR_THUMB_MIN, (viewportHeight / totalHeight) * trackHeight);
 		const thumbTop = maxScrollTop > 0 ? (scrollTop / maxScrollTop) * (trackHeight - thumbHeight) : 0;
-		
+
 		thumb.style.height = `${thumbHeight}px`;
 		thumb.style.transform = `translateY(${thumbTop}px)`;
 	}, [totalHeight, viewportHeight, maxScrollTop]);
@@ -105,37 +152,37 @@ export const VirtualList = forwardRef(function VirtualList({
 	const handleThumbMouseDown = useCallback((e) => {
 		e.preventDefault();
 		isDraggingRef.current = true;
-		
+
 		const track = scrollTrackRef.current;
 		const thumb = scrollThumbRef.current;
 		if (!track || !thumb) return;
 
 		// 添加拖拽状态样式（使 track 始终保持 hover 高亮）
 		track.classList.add('is-dragging');
-		
+
 		const trackRect = track.getBoundingClientRect();
 		const thumbRect = thumb.getBoundingClientRect();
 		const trackHeight = trackRect.height;
 		const thumbHeight = thumbRect.height;
-		
+
 		// 计算鼠标在thumb内的相对位置
 		const mouseOffsetInThumb = e.clientY - thumbRect.top;
-		
+
 		const handleMouseMove = (moveEvent) => {
 			if (!isDraggingRef.current) return;
-			
+
 			// 计算鼠标相对于track顶部的位置，减去在thumb内的偏移
 			const mousePositionInTrack = moveEvent.clientY - trackRect.top - mouseOffsetInThumb;
-			
+
 			// 计算滚动比例，限制在有效范围内
 			const maxThumbTop = trackHeight - thumbHeight;
 			const clampedThumbTop = Math.max(0, Math.min(mousePositionInTrack, maxThumbTop));
 			const scrollRatio = maxThumbTop > 0 ? clampedThumbTop / maxThumbTop : 0;
-			
+
 			const newScrollTop = scrollRatio * maxScrollTop;
 			updateScrollAndRange(newScrollTop);
 		};
-		
+
 		const handleMouseUp = () => {
 			isDraggingRef.current = false;
 			// 移除拖拽状态样式
@@ -143,17 +190,17 @@ export const VirtualList = forwardRef(function VirtualList({
 			document.removeEventListener('mousemove', handleMouseMove);
 			document.removeEventListener('mouseup', handleMouseUp);
 		};
-		
+
 		document.addEventListener('mousemove', handleMouseMove);
 		document.addEventListener('mouseup', handleMouseUp);
 	}, [maxScrollTop, updateScrollAndRange]);
 
 	const handleTrackClick = useCallback((e) => {
 		if (e.target === scrollThumbRef.current) return;
-		
+
 		const rect = scrollTrackRef.current?.getBoundingClientRect();
 		if (!rect) return;
-		
+
 		const clickY = e.clientY - rect.top;
 		const scrollRatio = clickY / rect.height;
 		const newScrollTop = scrollRatio * maxScrollTop;
@@ -164,16 +211,16 @@ export const VirtualList = forwardRef(function VirtualList({
 	useLayoutEffect(() => {
 		const container = containerRef.current;
 		if (!container) return;
-		
+
 		const updateViewport = () => {
 			const newHeight = container.clientHeight;
 			setViewportHeight(newHeight);
 		};
-		
+
 		const resizeObserver = new ResizeObserver(updateViewport);
 		resizeObserver.observe(container);
 		updateViewport(); // 初始更新
-		
+
 		return () => resizeObserver.disconnect();
 	}, []);
 
@@ -196,8 +243,10 @@ export const VirtualList = forwardRef(function VirtualList({
 			else if (align === 'end') next = targetTop - (viewportHeight - rowHeight);
 			updateScrollAndRange(next);
 		},
-		getScrollTop: () => scrollTop
-	}), [rowCount, rowHeight, viewportHeight, scrollTop, updateScrollAndRange]);
+		getScrollTop: () => scrollTop,
+		ensureRangeLoaded,
+		getItem: (i) => cache.get(i)
+	}), [rowCount, rowHeight, viewportHeight, scrollTop, updateScrollAndRange, ensureRangeLoaded, cache]);
 
 	// 渲染的项目
 	const renderedItems = useMemo(() => {
@@ -207,7 +256,8 @@ export const VirtualList = forwardRef(function VirtualList({
 		const offsetTop = start * rowHeight - scrollTop;
 		return Array.from({ length: count }, (_, i) => {
 			const rowIndex = start + i;
-			return renderRow(rowIndex, {
+			const item = cache.get(rowIndex);
+			return renderRow(rowIndex, item, {
 				position: 'absolute',
 				top: offsetTop + i * rowHeight,
 				height: rowHeight,
@@ -215,10 +265,10 @@ export const VirtualList = forwardRef(function VirtualList({
 				right: 0
 			});
 		});
-	}, [range, rowCount, rowHeight, scrollTop, renderRow]);
+	}, [range, rowCount, rowHeight, scrollTop, renderRow, cache]);
 
 	return (
-		<div 
+		<div
 			ref={containerRef}
 			className={`virtual-list ${className}`}
 			onWheel={handleWheel}
@@ -226,7 +276,7 @@ export const VirtualList = forwardRef(function VirtualList({
 			aria-rowcount={rowCount}
 		>
 			{/* 水平滚动视口 */}
-			<div 
+			<div
 				ref={viewportRef}
 				className="virtual-list-viewport"
 				onScroll={handleHorizontalScroll}
@@ -235,7 +285,7 @@ export const VirtualList = forwardRef(function VirtualList({
 					{renderedItems}
 				</div>
 			</div>
-			
+
 			{/* 虚拟滚动条 */}
 			<div className="virtual-scrollbar">
 				<div
