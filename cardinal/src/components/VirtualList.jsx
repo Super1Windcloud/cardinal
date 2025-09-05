@@ -32,8 +32,6 @@ export const VirtualList = forwardRef(function VirtualList({
 	const isDraggingRef = useRef(false);
 	const lastScrollLeftRef = useRef(0);
 	const loadingRef = useRef(new Set());
-	const cacheRef = useRef(null); // mirror of cache for stable ensureRangeLoaded
-	const scrollTopRef = useRef(0); // track current scrollTop without triggering renders
 
 	// ----- state -----
 	const [cache, setCache] = useState(() => new Map());
@@ -86,8 +84,6 @@ export const VirtualList = forwardRef(function VirtualList({
 	// 更新滚动位置和范围
 	const updateScrollAndRange = useCallback((nextScrollTop) => {
 		const clamped = Math.max(0, Math.min(nextScrollTop, maxScrollTop));
-		if (clamped === scrollTopRef.current) return; // avoid redundant state updates
-		scrollTopRef.current = clamped;
 		setScrollTop(clamped);
 		setRangeIfChanged(computeRange(clamped, viewportHeight));
 		updateScrollbar(clamped);
@@ -97,10 +93,9 @@ export const VirtualList = forwardRef(function VirtualList({
 	// 内置行数据加载
 	const ensureRangeLoaded = useCallback(async (start, end) => {
 		if (!results || start < 0 || end < start || rowCount === 0) return;
-		const currentCache = cacheRef.current;
 		const needLoading = [];
 		for (let i = start; i <= end; i++) {
-			if (!currentCache.has(i) && !loadingRef.current.has(i)) {
+			if (!cache.has(i) && !loadingRef.current.has(i)) {
 				needLoading.push(i);
 				loadingRef.current.add(i);
 			}
@@ -108,7 +103,6 @@ export const VirtualList = forwardRef(function VirtualList({
 		if (needLoading.length === 0) return;
 		try {
 			const slice = needLoading.map(i => results[i]);
-			console.log("get nodes info", slice);
 			const fetched = await invoke('get_nodes_info', { results: slice });
 			setCache(prev => {
 				const newCache = new Map(prev);
@@ -122,14 +116,14 @@ export const VirtualList = forwardRef(function VirtualList({
 			needLoading.forEach(i => loadingRef.current.delete(i));
 			console.error('Failed loading rows', err);
 		}
-	}, [results, rowCount]);
+	}, [results, rowCount, cache]);
 
 	// ----- event handlers -----
 	// 垂直滚动（阻止默认以获得一致行为）
 	const handleWheel = useCallback((e) => {
 		e.preventDefault();
-		updateScrollAndRange(scrollTopRef.current + e.deltaY);
-	}, [updateScrollAndRange]);
+		updateScrollAndRange(scrollTop + e.deltaY);
+	}, [scrollTop, updateScrollAndRange]);
 
 	// 水平滚动同步
 	const handleHorizontalScroll = useCallback((e) => {
@@ -196,7 +190,7 @@ export const VirtualList = forwardRef(function VirtualList({
 	}, [results]);
 
 	// range 变化时自动加载
-	useEffect(() => { // auto load, depends only on stable loader & range
+	useEffect(() => { // auto load
 		if (range.end >= range.start) ensureRangeLoaded(range.start, range.end);
 	}, [range, ensureRangeLoaded]);
 
@@ -212,16 +206,12 @@ export const VirtualList = forwardRef(function VirtualList({
 	}, []);
 
 	// 当参数变化时重新计算
-	useEffect(() => { // recompute on deps (avoid scrollTop dependency by using ref)
+	useEffect(() => { // recompute on deps
 		if (viewportHeight > 0) {
-			setRangeIfChanged(computeRange(scrollTopRef.current, viewportHeight));
-			updateScrollbar(scrollTopRef.current);
+			setRangeIfChanged(computeRange(scrollTop, viewportHeight));
+			updateScrollbar(scrollTop);
 		}
-	}, [rowCount, rowHeight, overscan, viewportHeight, computeRange, updateScrollbar, setRangeIfChanged]);
-
-	// keep refs synced after each render
-	cacheRef.current = cache;
-	scrollTopRef.current = scrollTop;
+	}, [rowCount, rowHeight, overscan, viewportHeight, scrollTop, computeRange, updateScrollbar, setRangeIfChanged]);
 
 	// ----- imperative API -----
 	// 暴露的API
