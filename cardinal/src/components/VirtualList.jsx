@@ -10,8 +10,7 @@ import React, {
 	useMemo
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-// Internal constants
-import { SCROLLBAR_THUMB_MIN } from '../constants';
+import Scrollbar from './Scrollbar';
 
 /**
  * 虚拟滚动列表组件（含行数据按需加载缓存）
@@ -27,9 +26,6 @@ export const VirtualList = forwardRef(function VirtualList({
 	// ----- refs -----
 	const containerRef = useRef(null);
 	const viewportRef = useRef(null);
-	const scrollTrackRef = useRef(null);
-	const scrollThumbRef = useRef(null);
-	const isDraggingRef = useRef(false);
 	const lastScrollLeftRef = useRef(0);
 	const loadingRef = useRef(new Set());
 
@@ -65,29 +61,12 @@ export const VirtualList = forwardRef(function VirtualList({
 		setRange(prev => (prev.start !== nextRange.start || prev.end !== nextRange.end) ? nextRange : prev);
 	}, []);
 
-	// 滚动条更新
-	const updateScrollbar = useCallback((st) => {
-		const track = scrollTrackRef.current;
-		const thumb = scrollThumbRef.current;
-		if (!track || !thumb || totalHeight <= viewportHeight) {
-			if (thumb) thumb.style.display = 'none';
-			return;
-		}
-		thumb.style.display = 'block';
-		const trackHeight = track.clientHeight;
-		const thumbHeight = Math.max(SCROLLBAR_THUMB_MIN, (viewportHeight / totalHeight) * trackHeight);
-		const thumbTop = maxScrollTop > 0 ? (st / maxScrollTop) * (trackHeight - thumbHeight) : 0;
-		thumb.style.height = `${thumbHeight}px`;
-		thumb.style.transform = `translateY(${thumbTop}px)`;
-	}, [totalHeight, viewportHeight, maxScrollTop]);
-
 	// 更新滚动位置和范围
 	const updateScrollAndRange = useCallback((nextScrollTop) => {
 		const clamped = Math.max(0, Math.min(nextScrollTop, maxScrollTop));
 		setScrollTop(clamped);
 		setRangeIfChanged(computeRange(clamped, viewportHeight));
-		updateScrollbar(clamped);
-	}, [maxScrollTop, computeRange, viewportHeight, updateScrollbar, setRangeIfChanged]);
+	}, [maxScrollTop, computeRange, viewportHeight, setRangeIfChanged]);
 
 	// ----- data loading -----
 	// 内置行数据加载
@@ -134,54 +113,6 @@ export const VirtualList = forwardRef(function VirtualList({
 		}
 	}, [onScrollSync]);
 
-	// 滚动条拖拽处理
-	const handleThumbMouseDown = useCallback((e) => {
-		e.preventDefault();
-		isDraggingRef.current = true;
-		const track = scrollTrackRef.current;
-		const thumb = scrollThumbRef.current;
-		if (!track || !thumb) return;
-		// 添加拖拽状态样式（使 track 始终保持 hover 高亮）
-		track.classList.add('is-dragging');
-		const trackRect = track.getBoundingClientRect();
-		const thumbRect = thumb.getBoundingClientRect();
-		const trackHeight = trackRect.height;
-		const thumbHeight = thumbRect.height;
-		// 计算鼠标在 thumb 内的相对位置
-		const mouseOffsetInThumb = e.clientY - thumbRect.top;
-		const handleMouseMove = (moveEvent) => {
-			if (!isDraggingRef.current) return;
-			// 计算鼠标相对于 track 顶部的位置，减去在 thumb 内的偏移
-			const mousePositionInTrack = moveEvent.clientY - trackRect.top - mouseOffsetInThumb;
-			// 计算滚动比例，限制在有效范围内
-			const maxThumbTop = trackHeight - thumbHeight;
-			const clampedThumbTop = Math.max(0, Math.min(mousePositionInTrack, maxThumbTop));
-			const scrollRatio = maxThumbTop > 0 ? clampedThumbTop / maxThumbTop : 0;
-			const newScrollTop = scrollRatio * maxScrollTop;
-			updateScrollAndRange(newScrollTop);
-		};
-		const handleMouseUp = () => {
-			isDraggingRef.current = false;
-			// 移除拖拽状态样式
-			track.classList.remove('is-dragging');
-			document.removeEventListener('mousemove', handleMouseMove);
-			document.removeEventListener('mouseup', handleMouseUp);
-		};
-		document.addEventListener('mousemove', handleMouseMove);
-		document.addEventListener('mouseup', handleMouseUp);
-	}, [maxScrollTop, updateScrollAndRange]);
-
-	// 滚动条轨道点击（跳转）
-	const handleTrackClick = useCallback((e) => {
-		if (e.target === scrollThumbRef.current) return;
-		const rect = scrollTrackRef.current?.getBoundingClientRect();
-		if (!rect) return;
-		const clickY = e.clientY - rect.top;
-		const scrollRatio = clickY / rect.height;
-		const newScrollTop = scrollRatio * maxScrollTop;
-		updateScrollAndRange(newScrollTop);
-	}, [maxScrollTop, updateScrollAndRange]);
-
 	// ----- effects -----
 	// 结果集变化时重置缓存
 	useEffect(() => { // results change -> reset cache
@@ -209,9 +140,8 @@ export const VirtualList = forwardRef(function VirtualList({
 	useEffect(() => { // recompute on deps
 		if (viewportHeight > 0) {
 			setRangeIfChanged(computeRange(scrollTop, viewportHeight));
-			updateScrollbar(scrollTop);
 		}
-	}, [rowCount, rowHeight, overscan, viewportHeight, scrollTop, computeRange, updateScrollbar, setRangeIfChanged]);
+	}, [rowCount, rowHeight, overscan, viewportHeight, scrollTop, computeRange, setRangeIfChanged]);
 
 	// ----- imperative API -----
 	// 暴露的API
@@ -258,19 +188,13 @@ export const VirtualList = forwardRef(function VirtualList({
 					{renderedItems}
 				</div>
 			</div>
-			<div className="virtual-scrollbar">
-				<div
-					ref={scrollTrackRef}
-					className="virtual-scrollbar-track"
-					onClick={handleTrackClick}
-				>
-					<div
-						ref={scrollThumbRef}
-						className="virtual-scrollbar-thumb"
-						onMouseDown={handleThumbMouseDown}
-					/>
-				</div>
-			</div>
+			<Scrollbar
+				totalHeight={totalHeight}
+				viewportHeight={viewportHeight}
+				maxScrollTop={maxScrollTop}
+				scrollTop={scrollTop}
+				onScrollUpdate={updateScrollAndRange}
+			/>
 		</div>
 	);
 });
