@@ -12,7 +12,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{CString, OsStr},
     io::ErrorKind,
-    num::NonZeroU64,
+    num::NonZeroU32,
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -626,8 +626,8 @@ impl SearchCache {
 
 #[derive(Encode, Decode)]
 pub struct MetadataCache {
-    ctime_index: BTreeMap<NonZeroU64, Vec<usize>>,
-    mtime_index: BTreeMap<NonZeroU64, Vec<usize>>,
+    ctime_index: BTreeMap<NonZeroU32, Vec<usize>>,
+    mtime_index: BTreeMap<NonZeroU32, Vec<usize>>,
     size_index: BTreeMap<u64, Vec<usize>>,
     /// For slab nodes without metadata
     no_ctime_index: BTreeSet<usize>,
@@ -670,7 +670,7 @@ impl MetadataCache {
         } else {
             self.no_mtime_index.insert(index);
         }
-        if let Some(size) = metadata.map(|x| x.size) {
+        if let Some(size) = metadata.map(|x| x.size()) {
             if let Some(indexes) = self.size_index.get_mut(&size) {
                 if !indexes.iter().any(|&x| x == index) {
                     indexes.push(index);
@@ -704,7 +704,7 @@ impl MetadataCache {
         } else {
             self.no_mtime_index.remove(&index);
         }
-        if let Some(size) = metadata.map(|x| x.size) {
+        if let Some(size) = metadata.map(|x| x.size()) {
             if let Some(indexes) = self.size_index.get_mut(&size) {
                 indexes.retain(|&x| x != index);
                 if indexes.is_empty() {
@@ -1286,11 +1286,11 @@ mod tests {
             .as_ref()
             .expect("Metadata for event_file.txt should be populated by event handler");
         assert_eq!(
-            file_slab_meta.size,
+            file_slab_meta.size(),
             new_file_meta_on_disk.len(),
             "Size mismatch for event_file.txt"
         );
-        assert_eq!(file_slab_meta.size, 4, "Size mismatch for event_file.txt");
+        assert_eq!(file_slab_meta.size(), 4, "Size mismatch for event_file.txt");
         assert!(
             file_slab_meta.mtime.is_some(),
             "mtime should be populated for event_file.txt"
@@ -1346,7 +1346,7 @@ mod tests {
             .as_ref()
             .expect("Metadata for file_in_event_subdir.txt should be populated");
         assert_eq!(
-            file_in_subdir_slab_meta.size,
+            file_in_subdir_slab_meta.size(),
             file_in_subdir_meta_on_disk.len(),
             "Size mismatch for file_in_event_subdir.txt"
         );
@@ -1591,7 +1591,7 @@ mod tests {
             .metadata
             .as_ref()
             .expect("File metadata should be Some after event processing");
-        assert_eq!(event_file_meta.size, 10);
+        assert_eq!(event_file_meta.size(), 10);
 
         // Simulate an event for a new directory with a file in it
         let event_dir_path = root_path.join("event_added_dir");
@@ -1620,7 +1620,7 @@ mod tests {
             .metadata
             .as_ref()
             .expect("File in event-added dir metadata should be Some");
-        assert_eq!(inner_file_meta.size, 4);
+        assert_eq!(inner_file_meta.size(), 4);
     }
 
     // --- scan_paths 专项测试 ---

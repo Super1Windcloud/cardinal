@@ -1,11 +1,13 @@
+mod type_and_size;
+
+use type_and_size::{NodeFileType, TypeAndSize};
 use bincode::{Decode, Encode};
 use rayon::{iter::ParallelBridge, prelude::ParallelIterator};
 use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     fs::{self, Metadata},
     io::{Error, ErrorKind},
-    num::NonZeroU64,
+    num::NonZeroU32,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
@@ -22,10 +24,9 @@ pub struct Node {
 
 #[derive(Debug, Serialize, Deserialize, Encode, Decode, Clone, Copy)]
 pub struct NodeMetadata {
-    pub r#type: NodeFileType,
-    pub ctime: Option<NonZeroU64>,
-    pub mtime: Option<NonZeroU64>,
-    pub size: u64,
+    pub type_and_size: TypeAndSize,
+    pub ctime: Option<NonZeroU32>,
+    pub mtime: Option<NonZeroU32>,
 }
 
 impl From<Metadata> for NodeMetadata {
@@ -37,50 +38,33 @@ impl From<Metadata> for NodeMetadata {
 impl NodeMetadata {
     fn new(metadata: &Metadata) -> Self {
         let r#type = metadata.file_type().into();
+        let size = metadata.size();
+        let type_and_size = TypeAndSize::new(r#type, size);
         let ctime = metadata
             .created()
             .ok()
             .and_then(|x| x.duration_since(UNIX_EPOCH).ok())
-            .and_then(|x| x.as_secs().try_into().ok());
+            .and_then(|x| u32::try_from(x.as_secs()).ok().and_then(|x| NonZeroU32::new(x)));
         let mtime = metadata
             .modified()
             .ok()
             .and_then(|x| x.duration_since(UNIX_EPOCH).ok())
-            .and_then(|x| x.as_secs().try_into().ok());
-        let size = metadata.size();
+            .and_then(|x| u32::try_from(x.as_secs()).ok().and_then(|x| NonZeroU32::new(x)));
         Self {
-            r#type,
+            type_and_size,
             ctime,
             mtime,
-            size,
         }
     }
-}
 
-#[derive(Debug, Serialize_repr, Deserialize_repr, Encode, Decode, Clone, Copy)]
-#[repr(u8)]
-pub enum NodeFileType {
-    // File occurs a lot, assign it to 0 for better compression ratio(I guess... maybe useful).
-    File = 0,
-    Dir = 1,
-    Symlink = 2,
-    Unknown = 3,
-}
+    pub fn r#type(&self) -> NodeFileType {
+        self.type_and_size.r#type()
+    }
 
-impl From<fs::FileType> for NodeFileType {
-    fn from(file_type: fs::FileType) -> Self {
-        if file_type.is_file() {
-            NodeFileType::File
-        } else if file_type.is_dir() {
-            NodeFileType::Dir
-        } else if file_type.is_symlink() {
-            NodeFileType::Symlink
-        } else {
-            NodeFileType::Unknown
-        }
+    pub fn size(&self) -> u64 {
+        self.type_and_size.size()
     }
 }
-
 #[derive(Default, Debug)]
 pub struct WalkData {
     pub num_files: AtomicUsize,
@@ -239,7 +223,7 @@ mod tests {
             } else {
                 // directory metadata may be Some (free metadata) but it's optional; ensure type correctness when present
                 if let Some(m) = n.metadata {
-                    assert!(matches!(m.r#type, NodeFileType::Dir));
+                    assert!(matches!(m.r#type(), NodeFileType::Dir));
                 }
                 for c in &n.children {
                     assert_no_file_metadata(c);
@@ -269,7 +253,7 @@ mod tests {
         }
         let file_node = find(&node, "meta_file.txt").unwrap();
         assert!(matches!(
-            file_node.metadata.map(|m| m.r#type),
+            file_node.metadata.map(|m| m.r#type()),
             Some(NodeFileType::File)
         ));
     }

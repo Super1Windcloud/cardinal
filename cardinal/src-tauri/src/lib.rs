@@ -59,8 +59,27 @@ async fn search(query: String, state: State<'_, SearchState>) -> Result<Vec<usiz
 #[derive(Serialize)]
 struct NodeInfo {
     path: String,
-    metadata: Option<NodeMetadata>,
+    metadata: Option<NodeInfoMetadata>,
     icon: Option<String>,
+}
+
+#[derive(Serialize)]
+struct NodeInfoMetadata {
+    r#type: u8,
+    size: u64,
+    ctime: u32,
+    mtime: u32,
+}
+
+impl NodeInfoMetadata {
+    pub fn from_metadata(metadata: NodeMetadata) -> Self {
+        Self {
+            r#type: metadata.r#type() as u8,
+            size: metadata.size(),
+            ctime: metadata.ctime.map(|x| x.get()).unwrap_or_default(),
+            mtime: metadata.mtime.map(|x| x.get()).unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -96,7 +115,7 @@ async fn get_nodes_info(
                         });
                     NodeInfo {
                         path: path.to_string_lossy().into_owned(),
-                        metadata,
+                        metadata: metadata.map(NodeInfoMetadata::from_metadata),
                         icon,
                     }
                 })
