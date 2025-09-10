@@ -125,7 +125,8 @@ pub fn icon_of_path_ql(path: &str) -> Option<Vec<u8>> {
     objc2::rc::autoreleasepool(|_| -> Option<Vec<u8>> {
         const THUMBNAIL_SIZE: f64 = 64.0;
         const THUMBNAIL_SCALE: f64 = 1.0;
-        let (width, height) = scale_with_aspect_ratio(width, height, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+        let (width, height) =
+            scale_with_aspect_ratio(width, height, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
         // use a slightly larger thumbnail size with 0.5 scale
         let path_url = unsafe { NSURL::fileURLWithPath(&NSString::from_str(path)) };
         let generator = unsafe { QLThumbnailGenerator::sharedGenerator() };
