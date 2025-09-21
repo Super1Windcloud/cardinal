@@ -54,6 +54,7 @@
         + NamePool 需要增加全局单例，且内部结构需要改造（改造成链表 + 内存块）（类似于 allocator）
 + 为什么扫描 /Library/Developer/CoreSimulator/Volumes/iOS_23A343 是单线程的？
 + 考虑类LSM/WAL设计?
++ icon 抓取之后异步 push，有些icon取得挺慢的
 
 ```bash
 npm run tauri dev -- --release --features dev
