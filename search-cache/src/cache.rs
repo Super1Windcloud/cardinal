@@ -17,7 +17,7 @@ use std::{
     io::ErrorKind,
     num::NonZeroU32,
     path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
+    sync::{LazyLock, atomic::AtomicBool},
     time::Instant,
 };
 use thin_vec::ThinVec;
@@ -160,8 +160,7 @@ pub struct SearchCache {
     last_event_id: u64,
     slab_root: SlabIndex,
     slab: ThinSlab<SlabNode>,
-    name_index: BTreeMap<Box<str>, HashSet<SlabIndex>>,
-    name_pool: NamePool,
+    name_index: BTreeMap<&'static str, HashSet<SlabIndex>>,
     ignore_path: Option<&'static Path>,
     cancel: Option<&'static AtomicBool>,
 }
@@ -329,14 +328,13 @@ impl SearchCache {
         cancel: Option<&'static AtomicBool>,
     ) -> Self {
         // name pool construction speed is fast enough that caching it doesn't worth it.
-        let name_pool = name_pool(&name_index);
+        let name_index = name_pool(name_index);
         Self {
             path,
             last_event_id,
             slab_root,
             slab,
             name_index,
-            name_pool,
             ignore_path,
             cancel,
         }
@@ -375,24 +373,24 @@ impl SearchCache {
                 // 1. deduplicate names
                 // 2. keep the search result in order
                 let names: BTreeSet<_> = match segment {
-                    Segment::Substr(substr) => self.name_pool.search_substr(substr).collect(),
+                    Segment::Substr(substr) => NAME_POOL.search_substr(substr),
                     Segment::Prefix(prefix) => {
                         let mut buffer = Vec::with_capacity(prefix.len() + 1);
                         buffer.push(0);
                         buffer.extend_from_slice(prefix.as_bytes());
-                        self.name_pool.search_prefix(&buffer).collect()
+                        NAME_POOL.search_prefix(&buffer)
                     }
                     Segment::Exact(exact) => {
                         let mut buffer = Vec::with_capacity(exact.len() + 2);
                         buffer.push(0);
                         buffer.extend_from_slice(exact.as_bytes());
                         buffer.push(0);
-                        self.name_pool.search_exact(&buffer).collect()
+                        NAME_POOL.search_exact(&buffer)
                     }
                     Segment::Suffix(suffix) => {
                         // Query contains nul is very rare
                         let suffix = CString::new(*suffix).expect("Query contains nul");
-                        self.name_pool.search_suffix(&suffix).collect()
+                        NAME_POOL.search_suffix(&suffix)
                     }
                 };
                 let mut nodes = Vec::with_capacity(names.len());
@@ -430,12 +428,12 @@ impl SearchCache {
     fn push_node(&mut self, node: SlabNode) -> SlabIndex {
         let node_name = node.name.clone();
         let index = self.slab.insert(node);
-        if let Some(indexes) = self.name_index.get_mut(&node_name) {
+        if let Some(indexes) = self.name_index.get_mut(&*node_name) {
             indexes.insert(index);
         } else {
             let mut indices = HashSet::with_capacity(1);
             indices.insert(index);
-            self.name_pool.push(&node_name);
+            let node_name = NAME_POOL.push(&node_name);
             self.name_index.insert(node_name, indices);
         }
         index
@@ -564,11 +562,11 @@ impl SearchCache {
             if let Some(node) = cache.slab.try_remove(index) {
                 let indexes = cache
                     .name_index
-                    .get_mut(&node.name)
+                    .get_mut(&*node.name)
                     .expect("inconsistent name index and node");
                 indexes.remove(&index);
                 if indexes.is_empty() {
-                    cache.name_index.remove(&node.name);
+                    cache.name_index.remove(&*node.name);
                     // TODO(ldm0): actually we need to remove name in the name pool,
                     // but currently name pool doesn't support remove. (GC is needed for name pool)
                     // self.name_pool.remove(&node.name);
@@ -594,10 +592,13 @@ impl SearchCache {
             slab_root,
             slab,
             name_index,
-            name_pool: _,
             ignore_path: _,
             cancel: _,
         } = self;
+        let name_index = name_index
+            .into_iter()
+            .map(|(k, v)| (k.to_string().into_boxed_str(), v))
+            .collect();
         write_cache_to_file(
             cache_path,
             PersistentStorage {
@@ -805,18 +806,23 @@ impl SearchCache {
     }
 }
 
-fn name_pool(name_index: &BTreeMap<Box<str>, HashSet<SlabIndex>>) -> NamePool {
+pub static NAME_POOL: LazyLock<NamePool> = LazyLock::new(|| NamePool::new());
+
+fn name_pool(
+    name_index: BTreeMap<Box<str>, HashSet<SlabIndex>>,
+) -> BTreeMap<&'static str, HashSet<SlabIndex>> {
     let name_pool_time = Instant::now();
-    let mut name_pool = NamePool::new();
-    for name in name_index.keys() {
-        name_pool.push(name);
+    let mut new_name_index = BTreeMap::new();
+    for (name, indices) in name_index {
+        let name: &'static str = NAME_POOL.push(&name);
+        new_name_index.insert(name, indices);
     }
     info!(
-        "Name pool construction time: {:?}, size: {}MB",
+        "Name pool construction time: {:?}, count: {}",
         name_pool_time.elapsed(),
-        name_pool.len() as f32 / 1024. / 1024.
+        NAME_POOL.len(),
     );
-    name_pool
+    new_name_index
 }
 
 #[cfg(test)]
@@ -839,7 +845,7 @@ mod tests {
         assert_eq!(cache.slab.len(), 4);
         assert_eq!(cache.name_index.len(), 4);
         assert_eq!(
-            cache.name_pool.len(),
+            NAME_POOL.len(),
             temp_path
                 .file_name()
                 .unwrap()
