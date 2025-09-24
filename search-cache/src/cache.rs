@@ -24,11 +24,40 @@ use thin_vec::ThinVec;
 use tracing::{debug, info};
 use typed_num::Num;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+#[repr(transparent)]
+struct NamePoolName(&'static str);
+
+impl<'de> serde::de::Deserialize<'de> for NamePoolName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self(NAME_POOL.push(&s)))
+    }
+}
+
+impl std::ops::Deref for NamePoolName {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl NamePoolName {
+    pub fn as_str(&self) -> &'static str {
+        self.0
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SlabNode {
     parent: OptionSlabIndex,
     children: ThinVec<SlabIndex>,
-    name: Box<str>,
+    name: NamePoolName,
     metadata: SlabNodeMetadataCompact,
 }
 
@@ -45,13 +74,13 @@ impl SlabNode {
 
     pub fn new(
         parent: Option<SlabIndex>,
-        name: Box<str>,
+        name: &'static str,
         metadata: SlabNodeMetadataCompact,
     ) -> Self {
         Self {
             parent: OptionSlabIndex::from_option(parent),
             children: ThinVec::new(),
-            name,
+            name: NamePoolName(name),
             metadata,
         }
     }
@@ -207,6 +236,8 @@ impl SearchCache {
                      name_index,
                      last_event_id,
                  }| {
+                    // name pool construction speed is fast enough that caching it doesn't worth it.
+                    let name_index = name_pool(name_index);
                     Self::new(
                         path,
                         last_event_id,
@@ -274,20 +305,20 @@ impl SearchCache {
 
             Some((slab_root, slab))
         }
-        fn name_index(slab: &ThinSlab<SlabNode>) -> BTreeMap<Box<str>, HashSet<SlabIndex>> {
+        fn name_index(slab: &ThinSlab<SlabNode>) -> BTreeMap<&'static str, HashSet<SlabIndex>> {
             // TODO(ldm0): Memory optimization can be done by letting name index reference the name in the pool(gc need to be considered though)
             fn construct_name_index(
                 slab: &ThinSlab<SlabNode>,
-                name_index: &mut BTreeMap<Box<str>, HashSet<SlabIndex>>,
+                name_index: &mut BTreeMap<&'static str, HashSet<SlabIndex>>,
             ) {
                 // The slab is newly constructed, thus though slab.iter() iterates all slots, it won't waste too much.
                 slab.iter().for_each(|(i, node)| {
-                    if let Some(nodes) = name_index.get_mut(&node.name) {
+                    if let Some(nodes) = name_index.get_mut(node.name.as_str()) {
                         nodes.insert(i);
                     } else {
                         let mut nodes = HashSet::with_capacity(1);
                         nodes.insert(i);
-                        name_index.insert(node.name.clone(), nodes);
+                        name_index.insert(node.name.as_str(), nodes);
                     };
                 });
             }
@@ -323,12 +354,10 @@ impl SearchCache {
         last_event_id: u64,
         slab_root: SlabIndex,
         slab: ThinSlab<SlabNode>,
-        name_index: BTreeMap<Box<str>, HashSet<SlabIndex>>,
+        name_index: BTreeMap<&'static str, HashSet<SlabIndex>>,
         ignore_path: Option<&'static Path>,
         cancel: Option<&'static AtomicBool>,
     ) -> Self {
-        // name pool construction speed is fast enough that caching it doesn't worth it.
-        let name_index = name_pool(name_index);
         Self {
             path,
             last_event_id,
@@ -414,13 +443,13 @@ impl SearchCache {
         let mut current = index;
         let mut segments = vec![];
         while let Some(parent) = self.slab.get(current)?.parent() {
-            segments.push(self.slab.get(current)?.name.clone());
+            segments.push(self.slab.get(current)?.name.as_str());
             current = parent;
         }
         Some(
             self.path
                 .iter()
-                .chain(segments.iter().rev().map(|x| OsStr::new(x.as_ref())))
+                .chain(segments.iter().rev().map(|x| OsStr::new(x)))
                 .collect(),
         )
     }
@@ -463,11 +492,10 @@ impl SearchCache {
         let mut current_path = self.path.clone();
         for name in path.components().map(|x| x.as_os_str()) {
             current_path.push(name);
-            let name = name.to_string_lossy().into_owned().into_boxed_str();
             current = if let Some(&index) = self.slab[current]
                 .children
                 .iter()
-                .find(|&&x| self.slab[x].name == name)
+                .find(|&&x| self.slab[x].name.as_str() == name)
             {
                 index
             } else {
@@ -475,6 +503,7 @@ impl SearchCache {
                 let metadata = std::fs::symlink_metadata(&current_path)
                     .map(NodeMetadata::from)
                     .ok();
+                let name = NAME_POOL.push(name.to_string_lossy().as_ref());
                 let node = SlabNode::new(
                     Some(current),
                     name,
@@ -770,7 +799,8 @@ fn construct_node_slab(
         Some(metadata) => SlabNodeMetadataCompact::some(metadata),
         None => SlabNodeMetadataCompact::none(),
     };
-    let slab_node = SlabNode::new(parent, node.name.clone(), metadata);
+    let name = NAME_POOL.push(&*node.name);
+    let slab_node = SlabNode::new(parent, name, metadata);
     let index = slab.insert(slab_node);
     slab[index].children = node
         .children
@@ -795,7 +825,8 @@ impl SearchCache {
             // This function should only be called with Node fetched with metadata
             None => SlabNodeMetadataCompact::unaccessible(),
         };
-        let slab_node = SlabNode::new(parent, node.name.clone(), metadata);
+        let name = NAME_POOL.push(&*node.name);
+        let slab_node = SlabNode::new(parent, name, metadata);
         let index = self.push_node(slab_node);
         self.slab[index].children = node
             .children
