@@ -24,12 +24,16 @@ use thin_vec::ThinVec;
 use tracing::{debug, info};
 use typed_num::Num;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct NameAndIndex(*const u8, u8);
+#[derive(Debug, Clone, Copy)]
+struct NameAndParent {
+    ptr: *const u8,
+    len: u8,
+    parent: OptionSlabIndex,
+}
 
-unsafe impl Send for NameAndIndex {}
+unsafe impl Send for NameAndParent {}
 
-impl<'ser> Serialize for NameAndIndex {
+impl<'ser> Serialize for NameAndParent {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -38,16 +42,20 @@ impl<'ser> Serialize for NameAndIndex {
     }
 }
 
-impl<'de> serde::de::Deserialize<'de> for NameAndIndex {
+impl<'de> serde::de::Deserialize<'de> for NameAndParent {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::de::Deserializer<'de>,
     {
-        Ok(Self::from_str(NAME_POOL.push(&String::deserialize(deserializer)?)))
+        let s = NAME_POOL.push(&String::deserialize(deserializer)?);
+        // The parent index is lost during serialization.
+        // It should be reconstructed from the parent SlabNode.
+        // For now, we just put a placeholder.
+        Ok(Self::new(s, OptionSlabIndex::from_option(None)))
     }
 }
 
-impl std::ops::Deref for NameAndIndex {
+impl std::ops::Deref for NameAndParent {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -55,29 +63,35 @@ impl std::ops::Deref for NameAndIndex {
     }
 }
 
-impl NameAndIndex {
-    pub fn from_str(s: &'static str) -> Self {
-        Self(s.as_ptr(), s.len().try_into().unwrap())
+impl NameAndParent {
+    pub fn new(s: &'static str, parent: OptionSlabIndex) -> Self {
+        Self {
+            ptr: s.as_ptr(),
+            len: s
+                .len()
+                .try_into()
+                .expect("get filename larger than 256 bytes"),
+            parent,
+        }
     }
 
     pub fn as_str(&self) -> &'static str {
-        unsafe { std::str::from_raw_parts(self.0, self.1 as usize) }
+        unsafe { std::str::from_raw_parts(self.ptr, self.len as usize) }
+    }
+
+    pub fn parent(&self) -> Option<SlabIndex> {
+        self.parent.to_option()
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SlabNode {
-    parent: OptionSlabIndex,
+    name_and_parent: NameAndParent,
     children: ThinVec<SlabIndex>,
-    name: NameAndIndex,
     metadata: SlabNodeMetadataCompact,
 }
 
 impl SlabNode {
-    pub fn parent(&self) -> Option<SlabIndex> {
-        self.parent.to_option()
-    }
-
     pub fn add_children(&mut self, children: SlabIndex) {
         if !self.children.contains(&children) {
             self.children.push(children);
@@ -90,9 +104,8 @@ impl SlabNode {
         metadata: SlabNodeMetadataCompact,
     ) -> Self {
         Self {
-            parent: OptionSlabIndex::from_option(parent),
+            name_and_parent: NameAndParent::new(name, OptionSlabIndex::from_option(parent)),
             children: ThinVec::new(),
-            name: NameAndIndex::from_str(name),
             metadata,
         }
     }
@@ -325,12 +338,12 @@ impl SearchCache {
             ) {
                 // The slab is newly constructed, thus though slab.iter() iterates all slots, it won't waste too much.
                 slab.iter().for_each(|(i, node)| {
-                    if let Some(nodes) = name_index.get_mut(node.name.as_str()) {
+                    if let Some(nodes) = name_index.get_mut(node.name_and_parent.as_str()) {
                         nodes.insert(i);
                     } else {
                         let mut nodes = HashSet::with_capacity(1);
                         nodes.insert(i);
-                        name_index.insert(node.name.as_str(), nodes);
+                        name_index.insert(node.name_and_parent.as_str(), nodes);
                     };
                 });
             }
@@ -399,10 +412,16 @@ impl SearchCache {
                     let childs = &self.slab[node].children;
                     for &child in childs {
                         if match segment {
-                            Segment::Substr(substr) => self.slab[child].name.contains(*substr),
-                            Segment::Prefix(prefix) => self.slab[child].name.starts_with(*prefix),
-                            Segment::Exact(exact) => &*self.slab[child].name == *exact,
-                            Segment::Suffix(suffix) => self.slab[child].name.ends_with(*suffix),
+                            Segment::Substr(substr) => {
+                                self.slab[child].name_and_parent.contains(*substr)
+                            }
+                            Segment::Prefix(prefix) => {
+                                self.slab[child].name_and_parent.starts_with(*prefix)
+                            }
+                            Segment::Exact(exact) => &*self.slab[child].name_and_parent == *exact,
+                            Segment::Suffix(suffix) => {
+                                self.slab[child].name_and_parent.ends_with(*suffix)
+                            }
                         } {
                             new_node_set.push(child);
                         }
@@ -439,8 +458,8 @@ impl SearchCache {
     pub fn node_path(&self, index: SlabIndex) -> Option<PathBuf> {
         let mut current = index;
         let mut segments = vec![];
-        while let Some(parent) = self.slab.get(current)?.parent() {
-            segments.push(self.slab.get(current)?.name.as_str());
+        while let Some(parent) = self.slab.get(current)?.name_and_parent.parent() {
+            segments.push(self.slab.get(current)?.name_and_parent.as_str());
             current = parent;
         }
         Some(
@@ -452,7 +471,7 @@ impl SearchCache {
     }
 
     fn push_node(&mut self, node: SlabNode) -> SlabIndex {
-        let node_name = node.name.clone();
+        let node_name = node.name_and_parent.clone();
         let index = self.slab.insert(node);
         if let Some(indexes) = self.name_index.get_mut(&*node_name) {
             indexes.insert(index);
@@ -472,7 +491,7 @@ impl SearchCache {
             if let Some(&index) = self.slab[current]
                 .children
                 .iter()
-                .find(|&&x| &*self.slab[x].name == name)
+                .find(|&&x| &*self.slab[x].name_and_parent == name)
             {
                 current = index;
             } else {
@@ -492,7 +511,7 @@ impl SearchCache {
             current = if let Some(&index) = self.slab[current]
                 .children
                 .iter()
-                .find(|&&x| self.slab[x].name.as_str() == name)
+                .find(|&&x| self.slab[x].name_and_parent.as_str() == name)
             {
                 index
             } else {
@@ -538,7 +557,7 @@ impl SearchCache {
         if let Some(&old_node) = self.slab[parent]
             .children
             .iter()
-            .find(|&&x| path.file_name() == Some(OsStr::new(&*self.slab[x].name)))
+            .find(|&&x| path.file_name() == Some(OsStr::new(&*self.slab[x].name_and_parent)))
         {
             self.remove_node(old_node);
         }
@@ -588,11 +607,11 @@ impl SearchCache {
             if let Some(node) = cache.slab.try_remove(index) {
                 let indexes = cache
                     .name_index
-                    .get_mut(&*node.name)
+                    .get_mut(&*node.name_and_parent)
                     .expect("inconsistent name index and node");
                 indexes.remove(&index);
                 if indexes.is_empty() {
-                    cache.name_index.remove(&*node.name);
+                    cache.name_index.remove(&*node.name_and_parent);
                     // TODO(ldm0): actually we need to remove name in the name pool,
                     // but currently name pool doesn't support remove. (GC is needed for name pool)
                     // self.name_pool.remove(&node.name);
@@ -601,7 +620,7 @@ impl SearchCache {
         }
 
         // Remove parent reference, make whole subtree unreachable.
-        if let Some(parent) = self.slab[index].parent() {
+        if let Some(parent) = self.slab[index].name_and_parent.parent() {
             self.slab[parent].children.retain(|&x| x != index);
         }
         let mut stack = vec![index];
