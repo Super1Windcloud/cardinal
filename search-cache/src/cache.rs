@@ -13,7 +13,7 @@ use query_segmentation::{Segment, query_segmentation};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    ffi::{CString, OsStr},
+    ffi::OsStr,
     io::ErrorKind,
     num::NonZeroU32,
     path::{Path, PathBuf},
@@ -403,24 +403,9 @@ impl SearchCache {
                 // 2. keep the search result in order
                 let names: BTreeSet<_> = match segment {
                     Segment::Substr(substr) => NAME_POOL.search_substr(substr),
-                    Segment::Prefix(prefix) => {
-                        let mut buffer = Vec::with_capacity(prefix.len() + 1);
-                        buffer.push(0);
-                        buffer.extend_from_slice(prefix.as_bytes());
-                        NAME_POOL.search_prefix(&buffer)
-                    }
-                    Segment::Exact(exact) => {
-                        let mut buffer = Vec::with_capacity(exact.len() + 2);
-                        buffer.push(0);
-                        buffer.extend_from_slice(exact.as_bytes());
-                        buffer.push(0);
-                        NAME_POOL.search_exact(&buffer)
-                    }
-                    Segment::Suffix(suffix) => {
-                        // Query contains nul is very rare
-                        let suffix = CString::new(*suffix).expect("Query contains nul");
-                        NAME_POOL.search_suffix(&suffix)
-                    }
+                    Segment::Prefix(prefix) => NAME_POOL.search_prefix(*prefix),
+                    Segment::Exact(exact) => NAME_POOL.search_exact(*exact),
+                    Segment::Suffix(suffix) => NAME_POOL.search_suffix(*suffix),
                 };
                 let mut nodes = Vec::with_capacity(names.len());
                 names.into_iter().for_each(|name| {
