@@ -10,10 +10,15 @@ use fswalk::{Node, NodeFileType, NodeMetadata, walk_it};
 use hashbrown::HashSet;
 use namepool::NamePool;
 use query_segmentation::{Segment, query_segmentation};
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    de::{self, SeqAccess, Visitor},
+    ser::SerializeTuple,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
+    fmt,
     io::ErrorKind,
     num::NonZeroU32,
     path::{Path, PathBuf},
@@ -38,7 +43,10 @@ impl<'ser> Serialize for NameAndParent {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.as_str())
+        let mut s = serializer.serialize_tuple(2)?;
+        s.serialize_element(self.as_str())?;
+        s.serialize_element(&self.parent)?;
+        s.end()
     }
 }
 
@@ -47,11 +55,33 @@ impl<'de> serde::de::Deserialize<'de> for NameAndParent {
     where
         D: serde::de::Deserializer<'de>,
     {
-        let s = NAME_POOL.push(&String::deserialize(deserializer)?);
-        // The parent index is lost during serialization.
-        // It should be reconstructed from the parent SlabNode.
-        // For now, we just put a placeholder.
-        Ok(Self::new(s, OptionSlabIndex::from_option(None)))
+        struct NameAndParentVisitor;
+
+        impl<'de> Visitor<'de> for NameAndParentVisitor {
+            type Value = NameAndParent;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a tuple of (string, OptionSlabIndex)")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let name: String = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let parent: OptionSlabIndex = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+
+                let name_in_pool = NAME_POOL.push(&name);
+
+                Ok(NameAndParent::new(name_in_pool, parent))
+            }
+        }
+
+        deserializer.deserialize_tuple(2, NameAndParentVisitor)
     }
 }
 
