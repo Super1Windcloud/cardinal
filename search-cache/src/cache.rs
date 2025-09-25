@@ -24,32 +24,44 @@ use thin_vec::ThinVec;
 use tracing::{debug, info};
 use typed_num::Num;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
-#[repr(transparent)]
-struct NamePoolName(&'static str);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct NameAndIndex(*const u8, u8);
 
-impl<'de> serde::de::Deserialize<'de> for NamePoolName {
+unsafe impl Send for NameAndIndex {}
+
+impl<'ser> Serialize for NameAndIndex {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::de::Deserialize<'de> for NameAndIndex {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::de::Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
-        Ok(Self(NAME_POOL.push(&s)))
+        Ok(Self::from_str(NAME_POOL.push(&String::deserialize(deserializer)?)))
     }
 }
 
-impl std::ops::Deref for NamePoolName {
+impl std::ops::Deref for NameAndIndex {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        self.0
+        self.as_str()
     }
 }
 
-impl NamePoolName {
+impl NameAndIndex {
+    pub fn from_str(s: &'static str) -> Self {
+        Self(s.as_ptr(), s.len().try_into().unwrap())
+    }
+
     pub fn as_str(&self) -> &'static str {
-        self.0
+        unsafe { std::str::from_raw_parts(self.0, self.1 as usize) }
     }
 }
 
@@ -57,7 +69,7 @@ impl NamePoolName {
 pub struct SlabNode {
     parent: OptionSlabIndex,
     children: ThinVec<SlabIndex>,
-    name: NamePoolName,
+    name: NameAndIndex,
     metadata: SlabNodeMetadataCompact,
 }
 
@@ -80,7 +92,7 @@ impl SlabNode {
         Self {
             parent: OptionSlabIndex::from_option(parent),
             children: ThinVec::new(),
-            name: NamePoolName(name),
+            name: NameAndIndex::from_str(name),
             metadata,
         }
     }

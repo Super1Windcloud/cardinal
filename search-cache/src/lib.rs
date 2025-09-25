@@ -1,3 +1,4 @@
+#![feature(str_from_raw_parts)]
 mod cache;
 mod metadata_cache;
 mod persistent;
