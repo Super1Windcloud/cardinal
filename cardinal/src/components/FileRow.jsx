@@ -37,22 +37,25 @@ export function FileRow({ item, rowIndex, style, onContextMenu, searchQuery }) {
   };
 
   return (
-    <div style={style} className={`row ${rowIndex % 2 === 0 ? 'row-even' : 'row-odd'}`} onContextMenu={handleContextMenu}>
-      <div className="columns row-inner" title={path}>
-        <div className="filename-column">
-          {item.icon && <img src={item.icon} alt="icon" className="file-icon" />}
-          <MiddleEllipsisHighlight className="filename-text" text={filename} searchQuery={searchQuery} />
-        </div>
-        {/* Path 列显示目录路径（不包含文件名） */}
-        <span className="path-text" title={directoryPath}>
-          {splitTextWithHighlight(directoryPath || '', searchQuery).map((part, i) => (
-            part.isHighlight ? <strong key={i}>{part.text}</strong> : <span key={i}>{part.text}</span>
-          ))}
-        </span>
-        <span className={`size-text ${!sizeText ? 'muted' : ''}`}>{sizeText || '—'}</span>
-        <span className={`mtime-text ${!mtimeText ? 'muted' : ''}`}>{mtimeText || '—'}</span>
-        <span className={`ctime-text ${!ctimeText ? 'muted' : ''}`}>{ctimeText || '—'}</span>
+    <div
+      style={style}
+      className={`row columns ${rowIndex % 2 === 0 ? 'row-even' : 'row-odd'}`}
+      onContextMenu={handleContextMenu}
+      title={path}
+    >
+      <div className="filename-column">
+        {item.icon && <img src={item.icon} alt="icon" className="file-icon" />}
+        <MiddleEllipsisHighlight className="filename-text" text={filename} searchQuery={searchQuery} />
       </div>
+      {/* Path 列显示目录路径（不包含文件名） */}
+      <span className="path-text" title={directoryPath}>
+        {splitTextWithHighlight(directoryPath || '', searchQuery).map((part, i) => (
+          part.isHighlight ? <strong key={i}>{part.text}</strong> : <span key={i}>{part.text}</span>
+        ))}
+      </span>
+      <span className={`size-text ${!sizeText ? 'muted' : ''}`}>{sizeText || '—'}</span>
+      <span className={`mtime-text ${!mtimeText ? 'muted' : ''}`}>{mtimeText || '—'}</span>
+      <span className={`ctime-text ${!ctimeText ? 'muted' : ''}`}>{ctimeText || '—'}</span>
     </div>
   );
 }

@@ -338,8 +338,6 @@ button:active {
   overflow: visible; /* 允许父容器水平滚动时显示列内容 */
   background-color: var(--row-even);
   border-radius: 6px;
-  display: flex;
-  align-items: center;
 }
 
 .row-odd {
@@ -353,8 +351,6 @@ button:active {
 .row:hover {
   background-color: var(--row-hover);
 }
-
-/* .row-inner kept as a semantic hook via markup; styling comes from .columns */
 
 .path-text {
   min-width: 0;
@@ -382,8 +378,6 @@ button:active {
 
 .file-icon {
   width: 16px;
-  height: auto;
-  max-height: 16px;
   flex-shrink: 0;
   object-fit: contain;
 }
