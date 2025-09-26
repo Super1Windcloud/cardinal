@@ -6,10 +6,9 @@ export { ContextMenu } from './components/ContextMenu';
 export { FileRow } from './components/FileRow';
 export { VirtualList } from './components/VirtualList';
 // Hooks
-export { useAppState, useSearch } from './hooks';
 export { useColumnResize } from './hooks/useColumnResize';
 export { useContextMenu } from './hooks/useContextMenu';
 // Utils
-export { formatBytes, formatKB } from './utils/format';
+export { formatKB } from './utils/format';
 // Constants
 export * from './constants';
