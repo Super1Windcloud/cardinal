@@ -22,19 +22,15 @@
 # TODO
 - 文件空格预览支持
 - 支持普通搜索，正则搜索, glob search
-    - 不同的格式有开关按钮，类似于 vscode
+    - 不同的格式有开关按钮，类似于 vscode 搜索
     - 在输入不同的内容的时候自动推断是 glob 还是正则还是普通 substr 搜索，然后对应的按钮变成浅色
         - 用户可以手动勾选对应的模式按钮，变成深色
 - 搜索结果自动更新
     - FSEvent 更新之后要重新拉取搜索结果
 - 搜索结果排序
-- native 内存占用高(mmap?)
-    - namepool 和索引内存共享
 + shareded-slab + parking_lot::Mutex(+1 byte，内存体积友好)
     + 问题在于并行读写的正确处理，如 parent 消失场景
         + fsevent 改 slab 结构， metadata fetching 只增添 metadata 不改 slab 结构
-+ namepool 里面想要去重就用一个附属的hashset就行了（fnv hashset 不存储内容，只有hash）
-    + 只 insert 去重，不 remove 不覆盖，否则之前的 index 会失效（坏处就是如果一直有不重名的文件创建，name pool 会越来越大
 + 加一个页面放 fsevent 列表
     + 知道文件系统有哪些更新的需求
 + 加一个页面搜索一个文件夹曾经有过哪些文件
@@ -52,7 +48,6 @@
         + 改成用 namepool 变成偏移可以 24 byte -> (usize + u16)10 byte
         + https://superuser.com/questions/1561484/what-is-the-maximum-length-of-a-filename-apfs
         + NamePool 需要增加全局单例(运行过程中不变，对去重有更高的要求了)，且内部结构需要改造（改造成链表 + 内存块）（类似于 allocator）
-+ 为什么扫描 /Library/Developer/CoreSimulator/Volumes/iOS_23A343 是单线程的？
 + 考虑类LSM/WAL设计?
 + icon 抓取之后异步 push，有些icon取得挺慢的
 + 重启+reopen window之后会很慢
