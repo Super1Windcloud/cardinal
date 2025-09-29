@@ -6,8 +6,7 @@ import React, {
 	useLayoutEffect,
 	useEffect,
 	forwardRef,
-	useImperativeHandle,
-	useMemo
+	useImperativeHandle
 } from 'react';
 import Scrollbar from './Scrollbar';
 import { useDataLoader } from '../hooks/useDataLoader';
@@ -41,10 +40,8 @@ export const VirtualList = forwardRef(function VirtualList({
 	const { ensureRangeLoaded } = useDataLoader(results, rowCount);
 
 	// 计算总虚拟高度和滚动范围
-	const { totalHeight, maxScrollTop } = useMemo(() => ({
-		totalHeight: rowCount * rowHeight,
-		maxScrollTop: Math.max(0, rowCount * rowHeight - viewportHeight)
-	}), [rowCount, rowHeight, viewportHeight]);
+	const totalHeight = rowCount * rowHeight;
+	const maxScrollTop = Math.max(0, totalHeight - viewportHeight);
 
 	// ----- callbacks: pure calculations first -----
 	// 计算可见范围
@@ -58,17 +55,15 @@ export const VirtualList = forwardRef(function VirtualList({
 		};
 	}, [rowCount, rowHeight, overscan]);
 
-	// 统一的 range 更新封装
-	const setRangeIfChanged = useCallback((nextRange) => {
-		setRange(prev => (prev.start !== nextRange.start || prev.end !== nextRange.end) ? nextRange : prev);
-	}, []);
-
 	// 更新滚动位置和范围
 	const updateScrollAndRange = useCallback((nextScrollTop) => {
 		const clamped = Math.max(0, Math.min(nextScrollTop, maxScrollTop));
 		setScrollTop(clamped);
-		setRangeIfChanged(computeRange(clamped, viewportHeight));
-	}, [maxScrollTop, computeRange, viewportHeight, setRangeIfChanged]);
+		setRange(prev => {
+			const nextRange = computeRange(clamped, viewportHeight);
+			return (prev.start !== nextRange.start || prev.end !== nextRange.end) ? nextRange : prev;
+		});
+	}, [maxScrollTop, computeRange, viewportHeight]);
 
 	// ----- data loading -----
 	// 使用独立的 data loader hook
@@ -114,9 +109,12 @@ export const VirtualList = forwardRef(function VirtualList({
 	// 当参数变化时重新计算
 	useEffect(() => { // recompute on deps
 		if (viewportHeight > 0) {
-			setRangeIfChanged(computeRange(scrollTop, viewportHeight));
+			setRange(prev => {
+				const nextRange = computeRange(scrollTop, viewportHeight);
+				return (prev.start !== nextRange.start || prev.end !== nextRange.end) ? nextRange : prev;
+			});
 		}
-	}, [rowCount, rowHeight, overscan, viewportHeight, scrollTop, computeRange, setRangeIfChanged]);
+	}, [viewportHeight, scrollTop, computeRange]);
 
 	// ----- imperative API -----
 	// 暴露的API
@@ -127,12 +125,12 @@ export const VirtualList = forwardRef(function VirtualList({
 
 	// ----- rendered items memo -----
 	// 渲染的项目
-	const renderedItems = useMemo(() => {
-		const { start, end } = range;
-		if (!(rowCount > 0 && end >= start)) return null;
+	const { start, end } = range;
+	let renderedItems = null;
+	if (rowCount > 0 && end >= start) {
 		const count = end - start + 1;
 		const offsetTop = start * rowHeight - scrollTop;
-		return Array.from({ length: count }, (_, i) => {
+		renderedItems = Array.from({ length: count }, (_, i) => {
 			const rowIndex = start + i;
 			const item = cache.get(rowIndex);
 			return renderRow(rowIndex, item, {
@@ -143,7 +141,7 @@ export const VirtualList = forwardRef(function VirtualList({
 				right: 0
 			});
 		});
-	}, [range, rowCount, rowHeight, scrollTop, renderRow, cache]);
+	}
 
 	// ----- render -----
 	return (

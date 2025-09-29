@@ -12,6 +12,7 @@
     - ctime, mtime, size
     - 目前 metadata 启动后自动 fetching 流程不太明朗(需要更细粒度的锁)，先搁置
 - Windows/NTFS 支持
+- /Users/0ldm/Library/Caches/Google/Chrome/Default/Cache/Cache_Data 这里面更新太多了
 
 # TODO
 - 文件空格预览支持
