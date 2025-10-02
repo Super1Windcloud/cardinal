@@ -99,6 +99,7 @@ async fn search(
 struct NodeInfo {
     path: String,
     metadata: Option<NodeInfoMetadata>,
+    icon: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -130,7 +131,7 @@ struct StatusBarUpdate {
 #[serde(rename_all = "camelCase")]
 struct IconPayload {
     slab_index: SlabIndex,
-    icon: Option<String>,
+    icon: String,
 }
 
 fn run_background_event_loop<F>(
@@ -187,18 +188,18 @@ fn run_background_event_loop<F>(
                     continue;
                 }
 
-                let icon_update_tx = icon_update_tx.clone();
-                spawn(move || {
-                    icon_jobs.into_iter().for_each(|(slab_index, path)| {
-                        let icon = path
+                icon_jobs.into_iter().for_each(|(slab_index, path)| {
+                    let icon_update_tx = icon_update_tx.clone();
+                    spawn(move || {
+                        if let Some(icon) = path
                             .to_str()
-                            .and_then(fs_icon::icon_of_path)
+                            .and_then(fs_icon::icon_of_path_ql)
                             .map(|data| format!(
                                 "data:image/png;base64,{}",
                                 general_purpose::STANDARD.encode(&data)
-                            ));
-
-                        let _ = icon_update_tx.send(IconPayload { slab_index, icon });
+                            )) {
+                            let _ = icon_update_tx.send(IconPayload { slab_index, icon });
+                        }
                     });
                 });
             }
@@ -249,10 +250,23 @@ async fn get_nodes_info(
 
     let node_infos = nodes
         .into_iter()
-        .map(|SearchResultNode { path, metadata }| NodeInfo {
-            path: path.to_string_lossy().into_owned(),
-            metadata: metadata.as_ref().map(NodeInfoMetadata::from_metadata),
-        })
+        .map(|SearchResultNode { path, metadata }| {
+            let path = path.to_string_lossy().into_owned();
+            // icon_of_path_ns is fast enough, we can synchronously get basic
+            // icon here, and then get QuickLook icon later(with push
+            // icon_update).
+            let icon = fs_icon::icon_of_path_ns(&path).map(|data| {
+                format!(
+                    "data:image/png;base64,{}",
+                    general_purpose::STANDARD.encode(data)
+                )
+            });
+            NodeInfo {
+                path,
+                icon,
+                metadata: metadata.as_ref().map(NodeInfoMetadata::from_metadata),
+            }
+    })
         .collect();
 
     Ok(node_infos)
