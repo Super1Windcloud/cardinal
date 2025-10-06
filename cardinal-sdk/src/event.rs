@@ -32,3 +32,46 @@ impl FsEvent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_should_rescan() {
+        let root = std::path::Path::new("/root");
+
+        // ReScan always true
+        let event = FsEvent {
+            path: PathBuf::from("/root/file"),
+            flag: EventFlag::RootChanged,
+            id: 1,
+        };
+        assert!(event.should_rescan(root));
+
+        // SingleNode at root true
+        let event = FsEvent {
+            path: PathBuf::from("/root"),
+            flag: EventFlag::ItemModified | EventFlag::ItemIsFile,
+            id: 1,
+        };
+        assert!(event.should_rescan(root));
+
+        // SingleNode not at root false
+        let event = FsEvent {
+            path: PathBuf::from("/root/sub/file"),
+            flag: EventFlag::ItemModified | EventFlag::ItemIsFile,
+            id: 1,
+        };
+        assert!(!event.should_rescan(root));
+
+        // Nop false
+        let event = FsEvent {
+            path: PathBuf::from("/root/file"),
+            flag: EventFlag::HistoryDone,
+            id: 1,
+        };
+        assert!(!event.should_rescan(root));
+    }
+}

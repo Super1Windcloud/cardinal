@@ -67,3 +67,19 @@ pub fn event_id_to_timestamp(dev: dev_t, event_id: u64) -> i64 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_dev_of_path() {
+        let temp = NamedTempFile::new().unwrap();
+        let path_str = temp.path().to_str().unwrap();
+        let cpath = CString::new(path_str).unwrap();
+        let dev = dev_of_path(&cpath).unwrap();
+        assert!(dev > 0);
+    }
+}

@@ -18,3 +18,4 @@ crossbeam-channel = "0.5"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+tempfile = "3"
