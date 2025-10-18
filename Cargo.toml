@@ -9,7 +9,6 @@ members = [
     "lsf-tui",
     "fs-icon",
     "query-segmentation",
+    "cardinal-native",
 ]
-exclude = [
-    "cardinal",
-]
+exclude = ["cardinal"]
