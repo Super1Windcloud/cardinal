@@ -3,6 +3,7 @@ import React, {
   useRef,
   useState,
   useCallback,
+  useMemo,
   useLayoutEffect,
   useEffect,
   forwardRef,
@@ -147,22 +148,23 @@ export const VirtualList = forwardRef(function VirtualList(
   );
 
   // ----- rendered items memo -----
-  // 渲染的项目
-  const baseTop = start * rowHeight - scrollTop;
-  const renderedItems =
-    end >= start
-      ? Array.from({ length: end - start + 1 }, (_, i) => {
-          const rowIndex = start + i;
-          const item = cache.get(rowIndex);
-          return renderRow(rowIndex, item, {
-            position: 'absolute',
-            top: baseTop + i * rowHeight,
-            height: rowHeight,
-            left: 0,
-            right: 0,
-          });
-        })
-      : null;
+  // 渲染的项目 - 使用 useMemo 避免每次都创建新数组
+  const renderedItems = useMemo(() => {
+    if (end < start) return null;
+    
+    const baseTop = start * rowHeight - scrollTop;
+    return Array.from({ length: end - start + 1 }, (_, i) => {
+      const rowIndex = start + i;
+      const item = cache.get(rowIndex);
+      return renderRow(rowIndex, item, {
+        position: 'absolute',
+        top: baseTop + i * rowHeight,
+        height: rowHeight,
+        left: 0,
+        right: 0,
+      });
+    });
+  }, [start, end, scrollTop, rowHeight, cache, renderRow]);
 
   // ----- render -----
   return (

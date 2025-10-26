@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, memo } from 'react';
 import { MiddleEllipsisHighlight } from './MiddleEllipsisHighlight';
 import { formatKB } from '../utils/format';
 
@@ -13,7 +13,7 @@ function deriveHighlightTerm(query) {
   return segments[segments.length - 1].trim();
 }
 
-export function FileRow({ item, rowIndex, style, onContextMenu, searchQuery, caseInsensitive }) {
+export const FileRow = memo(function FileRow({ item, rowIndex, style, onContextMenu, searchQuery, caseInsensitive }) {
   const highlightTerm = useMemo(() => deriveHighlightTerm(searchQuery), [searchQuery]);
   if (!item || (typeof item !== 'string' && !item?.path)) {
     return null;
@@ -77,4 +77,4 @@ export function FileRow({ item, rowIndex, style, onContextMenu, searchQuery, cas
       <span className={`ctime-text ${!ctimeText ? 'muted' : ''}`}>{ctimeText || '—'}</span>
     </div>
   );
-}
+});

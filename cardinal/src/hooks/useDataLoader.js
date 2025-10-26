@@ -33,13 +33,31 @@ export function useDataLoader(results) {
         unlistenIconUpdate = await listen('icon_update', (event) => {
           const updates = event?.payload;
           setCache((prev) => {
-            const next = new Map(prev);
+            // 先收集有变化的项，避免提前创建 Map
+            const changes = [];
+            
             updates.forEach((update) => {
               const index = resultsRef.current.indexOf(update.slabIndex);
               if (index === -1) return;
-              const current = next.get(index);
-              next.set(index, current ? { ...current, icon: update.icon } : { icon: update.icon });
+              
+              const current = prev.get(index);
+              const newIcon = update.icon;
+              
+              // 只有 icon 真的变化了才记录
+              if (current?.icon !== newIcon) {
+                changes.push({ index, current, newIcon });
+              }
             });
+            
+            // 没有变化，直接返回原 Map，避免任何不必要的操作
+            if (changes.length === 0) return prev;
+            
+            // 有变化才创建新 Map 并应用更新
+            const next = new Map(prev);
+            changes.forEach(({ index, current, newIcon }) => {
+              next.set(index, current ? { ...current, icon: newIcon } : { icon: newIcon });
+            });
+            
             cacheRef.current = next;
             return next;
           });

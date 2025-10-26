@@ -288,17 +288,20 @@ function App() {
     if (headerRef.current) headerRef.current.scrollLeft = scrollLeft;
   }, []);
 
-  // 单元格渲染
-  const renderRow = (rowIndex, item, rowStyle) => (
-    <FileRow
-      key={rowIndex}
-      item={item}
-      rowIndex={rowIndex}
-      style={{ ...rowStyle, width: 'var(--columns-total)' }}
-      onContextMenu={showContextMenu}
-      searchQuery={currentQuery}
-      caseInsensitive={!caseSensitive}
-    />
+  // 单元格渲染 - 使用 useCallback 避免 VirtualList 不必要的重渲染
+  const renderRow = useCallback(
+    (rowIndex, item, rowStyle) => (
+      <FileRow
+        key={rowIndex}
+        item={item}
+        rowIndex={rowIndex}
+        style={{ ...rowStyle, width: 'var(--columns-total)' }}
+        onContextMenu={showContextMenu}
+        searchQuery={currentQuery}
+        caseInsensitive={!caseSensitive}
+      />
+    ),
+    [showContextMenu, currentQuery, caseSensitive],
   );
 
   const getDisplayState = () => {
