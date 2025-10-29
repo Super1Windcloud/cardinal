@@ -672,8 +672,8 @@ impl SearchCache {
 /// - FSEvents 高频且可能“冒泡”出大量同一子树的文件/目录更改，合并可以显著降低后续 IO / 元数据抓取开销。
 ///
 /// 算法复杂度:
-/// - 最坏 O(n^2)：当输入是严格降序的深层路径链 (如 a/b/c/d/e ... 之后再插入 a)，会产生多次 retain 过滤。
-/// - 典型批次 (几十个以内) 成本可接受；如需进一步优化，可改为先排序再线性扫描或使用 Trie/前缀树。
+/// - 复杂度约为 O(n log n + m * depth)：先按深度排序，再线性扫描并检查祖先。
+/// - 若后续需要进一步优化，可继续引入 Trie/前缀树结构。
 ///
 /// Corner Cases & 处理方式:
 /// - 空输入 => 返回空 Vec。
@@ -687,24 +687,57 @@ impl SearchCache {
 ///
 /// 效果: 本地测试跳过了 415449 个事件中 173034 个事件的扫描
 fn scan_paths(events: Vec<FsEvent>) -> Vec<PathBuf> {
-    let num_events = events.len();
-    events
+    let mut candidates: Vec<(PathBuf, usize)> = events
         .into_iter()
         .filter(|event| {
-            // Sometimes there are rediculous events assuming dir as file, so we always scan them as folder
+            // Sometimes there are ridiculous events assuming dir as file, so we always scan them as folder
             matches!(
                 event.flag.scan_type(),
                 ScanType::SingleNode | ScanType::Folder
             )
         })
-        .map(|event| event.path)
-        .fold(Vec::with_capacity(num_events), |mut events, path| {
-            if !events.iter().any(|p: &PathBuf| path.starts_with(p)) {
-                events.retain(|p: &PathBuf| !p.starts_with(&path));
-                events.push(path);
-            }
-            events
+        .map(|event| {
+            let path = event.path;
+            let depth = path_depth(&path);
+            (path, depth)
         })
+        .collect();
+
+    candidates.sort_unstable_by(|(path_a, depth_a), (path_b, depth_b)| {
+        depth_a.cmp(depth_b).then_with(|| path_a.cmp(path_b))
+    });
+    candidates.dedup_by(|(path_a, _), (path_b, _)| path_a == path_b);
+
+    let mut selected = Vec::with_capacity(candidates.len());
+    let mut selected_set = HashSet::with_capacity(candidates.len());
+    for (path, _) in candidates {
+        if has_selected_ancestor(&path, &selected_set) {
+            continue;
+        }
+        selected_set.insert(path.clone());
+        selected.push(path);
+    }
+    selected
+}
+
+fn path_depth(path: &Path) -> usize {
+    path.components().count()
+}
+
+fn has_selected_ancestor(path: &Path, selected: &HashSet<PathBuf>) -> bool {
+    if selected.is_empty() {
+        return false;
+    }
+    if selected.contains(path) {
+        return true;
+    }
+    let mut ancestor = path.to_path_buf();
+    while ancestor.pop() {
+        if selected.contains(&ancestor) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Error type for `SearchCache::handle_fs_event`.
@@ -867,7 +900,7 @@ mod tests {
 
         let mock_events = vec![FsEvent {
             path: temp_path.join("new_file.txt"),
-            id: cache.last_event_id - 1,
+            id: cache.last_event_id.saturating_sub(1),
             flag: EventFlag::ItemCreated,
         }];
 
@@ -1816,6 +1849,59 @@ mod tests {
         ];
         let out = scan_paths(events);
         assert_eq!(out, vec![PathBuf::from("/mix/dir/sub")]);
+    }
+
+    #[test]
+    fn test_scan_paths_depth_then_lexicographic_ordering() {
+        let events = vec![
+            FsEvent {
+                path: PathBuf::from("/z/child"),
+                id: 1,
+                flag: EventFlag::ItemCreated | EventFlag::ItemIsFile,
+            },
+            FsEvent {
+                path: PathBuf::from("/a"),
+                id: 2,
+                flag: EventFlag::ItemCreated | EventFlag::ItemIsDir,
+            },
+            FsEvent {
+                path: PathBuf::from("/m"),
+                id: 3,
+                flag: EventFlag::ItemCreated | EventFlag::ItemIsDir,
+            },
+            FsEvent {
+                path: PathBuf::from("/a/child"),
+                id: 4,
+                flag: EventFlag::ItemCreated | EventFlag::ItemIsFile,
+            },
+        ];
+        let out = scan_paths(events);
+        assert_eq!(
+            out,
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/m"),
+                PathBuf::from("/z/child")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_scan_paths_handles_root_ancestor() {
+        let events = vec![
+            FsEvent {
+                path: PathBuf::from("/foo/bar"),
+                id: 1,
+                flag: EventFlag::ItemCreated | EventFlag::ItemIsFile,
+            },
+            FsEvent {
+                path: PathBuf::from("/"),
+                id: 2,
+                flag: EventFlag::ItemCreated | EventFlag::ItemIsDir,
+            },
+        ];
+        let out = scan_paths(events);
+        assert_eq!(out, vec![PathBuf::from("/")]);
     }
 
     #[test]
