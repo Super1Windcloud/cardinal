@@ -9,6 +9,7 @@ export function useDataLoader(results) {
   const loadingRef = useRef(new Set());
   const versionRef = useRef(0);
   const cacheRef = useRef();
+  const indexMapRef = useRef(new Map());
   const [cache, setCache] = useState(() => {
     const initial = new Map();
     cacheRef.current = initial;
@@ -23,6 +24,13 @@ export function useDataLoader(results) {
     const nextCache = new Map();
     cacheRef.current = nextCache;
     resultsRef.current = Array.isArray(results) ? results : [];
+    const indexMap = new Map();
+    resultsRef.current.forEach((value, index) => {
+      if (value != null) {
+        indexMap.set(value, index);
+      }
+    });
+    indexMapRef.current = indexMap;
     setCache(nextCache);
   }, [results]);
 
@@ -35,29 +43,26 @@ export function useDataLoader(results) {
           setCache((prev) => {
             // 先收集有变化的项，避免提前创建 Map
             const changes = [];
-            
             updates.forEach((update) => {
-              const index = resultsRef.current.indexOf(update.slabIndex);
-              if (index === -1) return;
-              
+              const index = indexMapRef.current.get(update.slabIndex);
+              if (index === undefined) return;
               const current = prev.get(index);
               const newIcon = update.icon;
-              
               // 只有 icon 真的变化了才记录
               if (current?.icon !== newIcon) {
                 changes.push({ index, current, newIcon });
               }
             });
-            
+
             // 没有变化，直接返回原 Map，避免任何不必要的操作
             if (changes.length === 0) return prev;
-            
+
             // 有变化才创建新 Map 并应用更新
             const next = new Map(prev);
             changes.forEach(({ index, current, newIcon }) => {
               next.set(index, current ? { ...current, icon: newIcon } : { icon: newIcon });
             });
-            
+
             cacheRef.current = next;
             return next;
           });
