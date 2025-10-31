@@ -316,18 +316,26 @@ impl SearchCache {
             if let Some(nodes) = &node_set {
                 let mut new_node_set = Vec::with_capacity(nodes.len());
                 for &node in nodes {
-                    let childs = &self.slab[node].children;
-                    for &child in childs.iter() {
-                        if matcher.matches(self.slab[child].name_and_parent.as_str()) {
-                            new_node_set.push(child);
-                        }
-                    }
+                    let mut child_matches = self.slab[node]
+                        .children
+                        .iter()
+                        .filter_map(|&child| {
+                            let name = self.slab[child].name_and_parent.as_str();
+                            if matcher.matches(name) {
+                                Some((name, child))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    child_matches.sort_unstable_by_key(|(name, _)| *name);
+                    new_node_set.extend(child_matches.into_iter().map(|(_, index)| index));
                 }
                 node_set = Some(new_node_set);
             } else {
                 // Use BTreeSet here to:
-                // 1. deduplicate names
-                // 2. keep the search result in order
+                // 1. Deduplicate filenames
+                // 2. Keep filename of the search results in order
                 let names: BTreeSet<_> = match matcher {
                     SegmentMatcher::Plain { kind, needle } => match kind {
                         SegmentKind::Substr => NAME_POOL.search_substr(needle),
@@ -341,7 +349,22 @@ impl SearchCache {
                 names.into_iter().for_each(|name| {
                     // namepool doesn't shrink, so it can contains non-existng names. Therefore, we don't error out on None branch here.
                     if let Some(x) = self.name_index.get(name) {
-                        nodes.extend(x.iter().copied());
+                        if x.len() == 1 {
+                            // Fast path for single node
+                            nodes.push(*x.iter().next().unwrap());
+                            return;
+                        } else {
+                            // For each single distinct filename, sort all matching nodes by full path
+                            // We only do it for each distinct filename(rather than collect all of them and sort) to reduce sorting overhead(as filenames are already sorted)
+                            let mut node_paths = x
+                                .iter()
+                                .copied()
+                                .filter_map(|x| self.node_path(x).map(|path| (path, x)))
+                                .collect::<Vec<_>>();
+                            node_paths
+                                .sort_unstable_by(|(path_a, _), (path_b, _)| path_a.cmp(path_b));
+                            nodes.extend(node_paths.into_iter().map(|(_, index)| index));
+                        }
                     }
                 });
                 node_set = Some(nodes);
