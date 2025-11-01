@@ -307,7 +307,7 @@ button:active {
 /* Events grid layout - similar to files grid */
 .columns-events {
   display: grid;
-  grid-template-columns: var(--w-event-name) var(--w-event-path) var(--w-event-time);
+  grid-template-columns: var(--w-event-time) var(--w-event-name) var(--w-event-path);
   column-gap: var(--col-gap);
   align-items: center;
   width: var(--columns-events-total);
@@ -331,14 +331,8 @@ button:active {
 }
 
 .event-name-text {
-  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.event-path-text {
-  color: var(--color-muted);
-  font-size: 0.95em;
 }
 
 .event-time-column {
@@ -347,9 +341,12 @@ button:active {
   gap: 2px;
 }
 
-.event-time-primary {
+/* Apply monospace font only to data cells, not headers */
+.row .event-time-primary {
   font-size: 0.95em;
   line-height: 1.2;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .event-time-secondary {
@@ -612,6 +609,13 @@ button:active {
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0 var(--cell-hpad);
+}
+
+/* Apply monospace font only to data cells, not headers */
+.row .mtime-text,
+.row .ctime-text {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .size-text {

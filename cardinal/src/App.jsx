@@ -108,15 +108,18 @@ function App() {
     getMenuItems: getFilesMenuItems 
   } = useContextMenu(autoFitColumns);
 
-  // Event columns resize state
-  const [eventColWidths, setEventColWidths] = useState(() => {
+  // Calculate event column widths based on ratios
+  const calculateEventColWidths = useCallback(() => {
     const totalWidth = window.innerWidth - 60;
     return {
-      name: Math.floor(totalWidth * 0.25),
+      time: Math.floor(totalWidth * 0.2),
+      name: Math.floor(totalWidth * 0.3),
       path: Math.floor(totalWidth * 0.50),
-      time: Math.floor(totalWidth * 0.25),
     };
-  });
+  }, []);
+
+  // Event columns resize state
+  const [eventColWidths, setEventColWidths] = useState(calculateEventColWidths);
 
   const onEventResizeStart = useCallback(
     (e, key) => {
@@ -148,13 +151,8 @@ function App() {
   );
 
   const autoFitEventColumns = useCallback(() => {
-    const totalWidth = window.innerWidth - 60;
-    setEventColWidths({
-      name: Math.floor(totalWidth * 0.25),
-      path: Math.floor(totalWidth * 0.50),
-      time: Math.floor(totalWidth * 0.25),
-    });
-  }, []);
+    setEventColWidths(calculateEventColWidths());
+  }, [calculateEventColWidths]);
 
   // Events context menu
   const { 

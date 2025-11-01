@@ -4,11 +4,12 @@ import List from 'react-virtualized/dist/commonjs/List';
 import 'react-virtualized/styles.css';
 import { ROW_HEIGHT } from '../constants';
 import { MiddleEllipsisHighlight } from './MiddleEllipsisHighlight';
+import { formatTimestamp } from '../utils/format';
 
 const COLUMNS = [
+  { key: 'time', label: 'Time' },
   { key: 'name', label: 'Filename' },
   { key: 'path', label: 'Path' },
-  { key: 'time', label: 'Time' },
 ];
 
 const BOTTOM_THRESHOLD = 50; // pixels from bottom to consider "at bottom"
@@ -30,31 +31,13 @@ const splitPath = (path) => {
   return { name, directory };
 };
 
-const toDate = (timestamp) => {
-  if (typeof timestamp !== 'number' || Number.isNaN(timestamp) || !Number.isFinite(timestamp)) {
-    return null;
-  }
-  return new Date(timestamp * 1000);
-};
-
-// Create date formatter
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-});
-
 // EventRow component for rendering individual rows
 const EventRow = memo(function EventRow({ item: event, rowIndex, style, onContextMenu, searchQuery, caseInsensitive }) {
   const pathSource = event?.path ?? '';
   const { name, directory } = splitPath(pathSource);
   const timestamp = event?.timestamp;
   
-  const date = toDate(timestamp);
-  const formattedDate = date ? dateFormatter.format(date) : '—';
+  const formattedDate = formatTimestamp(timestamp) || '—';
 
   const handleContextMenu = useCallback(
     (e) => {
@@ -72,6 +55,9 @@ const EventRow = memo(function EventRow({ item: event, rowIndex, style, onContex
       title={pathSource}
       onContextMenu={handleContextMenu}
     >
+      <div className="event-time-column">
+        <span className="event-time-primary">{formattedDate}</span>
+      </div>
       <div className="event-name-column">
         <MiddleEllipsisHighlight
           text={name || '—'}
@@ -83,9 +69,6 @@ const EventRow = memo(function EventRow({ item: event, rowIndex, style, onContex
       <span className="event-path-text" title={directory}>
         {directory || (pathSource ? '/' : '—')}
       </span>
-      <div className="event-time-column">
-        <span className="event-time-primary">{formattedDate}</span>
-      </div>
     </div>
   );
 });

@@ -1,6 +1,6 @@
 import React, { useMemo, memo } from 'react';
 import { MiddleEllipsisHighlight } from './MiddleEllipsisHighlight';
-import { formatKB } from '../utils/format';
+import { formatKB, formatTimestamp } from '../utils/format';
 
 const SEGMENT_SEPARATOR = /[\\/]+/;
 
@@ -40,10 +40,10 @@ export const FileRow = memo(function FileRow({
   }
 
   const mtimeSec = typeof item !== 'string' ? (item?.metadata?.mtime ?? item?.mtime) : undefined;
-  const mtimeText = mtimeSec != null ? new Date(mtimeSec * 1000).toLocaleString() : null;
+  const mtimeText = formatTimestamp(mtimeSec);
 
   const ctimeSec = typeof item !== 'string' ? (item?.metadata?.ctime ?? item?.ctime) : undefined;
-  const ctimeText = ctimeSec != null ? new Date(ctimeSec * 1000).toLocaleString() : null;
+  const ctimeText = formatTimestamp(ctimeSec);
 
   const sizeBytes = typeof item !== 'string' ? (item?.metadata?.size ?? item?.size) : undefined;
   const sizeText = item?.metadata?.type !== 1 ? formatKB(sizeBytes) : null;
