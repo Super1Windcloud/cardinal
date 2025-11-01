@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, memo, useEffect } from 'react';
+import React, { useCallback, useRef, memo, useEffect, useImperativeHandle, forwardRef } from 'react';
 import AutoSizer from 'react-virtualized/dist/commonjs/AutoSizer';
 import List from 'react-virtualized/dist/commonjs/List';
 import 'react-virtualized/styles.css';
@@ -88,16 +88,27 @@ const EventRow = memo(function EventRow({ item: event, rowIndex, style, onContex
   );
 });
 
-const FSEventsPanel = ({
+const FSEventsPanel = forwardRef(({
   events,
   onResizeStart,
   onContextMenu,
   onHeaderContextMenu,
   searchQuery,
   caseInsensitive,
-}) => {
+}, ref) => {
   const headerRef = useRef(null);
   const listRef = useRef(null);
+
+  // Expose scrollToBottom method to parent
+  useImperativeHandle(ref, () => ({
+    scrollToBottom: () => {
+      const list = listRef.current;
+      if (!list || events.length === 0) return;
+      
+      // scrollToRow with 'end' alignment ensures the row is fully visible at the bottom
+      list.scrollToRow(events.length - 1);
+    }
+  }), [events.length]);
 
   // Handle scrolling - sync horizontal scroll to header
   const handleScroll = useCallback(({ scrollLeft }) => {
@@ -170,6 +181,8 @@ const FSEventsPanel = ({
       </div>
     </div>
   );
-};
+});
+
+FSEventsPanel.displayName = 'FSEventsPanel';
 
 export default FSEventsPanel;

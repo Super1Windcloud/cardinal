@@ -98,6 +98,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('files');
   const [recentEvents, setRecentEvents] = useState([]);
   const [eventFilterQuery, setEventFilterQuery] = useState('');
+  const eventsPanelRef = useRef(null);
   const { colWidths, onResizeStart, autoFitColumns } = useColumnResize();
   
   // Files context menu
@@ -494,6 +495,17 @@ function App() {
 
   const displayState = getDisplayState();
 
+  // Scroll to bottom when switching to events tab
+  useEffect(() => {
+    if (activeTab === 'events') {
+      // Queue the scroll after the current render cycle completes
+      // This ensures AutoSizer has measured the List component
+      queueMicrotask(() => {
+        eventsPanelRef.current?.scrollToBottom?.();
+      });
+    }
+  }, [activeTab]);
+
   // Handle tab change: clear search input when switching tabs
   const handleTabChange = useCallback(
     (newTab) => {
@@ -579,6 +591,7 @@ function App() {
         {activeTab === 'events' ? (
           <div className="events-view">
             <FSEventsPanel
+              ref={eventsPanelRef}
               events={filteredEvents}
               onResizeStart={onEventResizeStart}
               onContextMenu={showContextMenu}
