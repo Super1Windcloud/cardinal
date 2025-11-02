@@ -1,5 +1,4 @@
 use crate::FsEvent;
-use anyhow::{Result, bail};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use dispatch2::{DispatchQueue, DispatchQueueAttr, DispatchRetained};
 use libc::dev_t;
@@ -96,17 +95,17 @@ impl EventStream {
     }
 
     // Start the FSEventStream with a dispatch queue.
-    pub fn spawn(self) -> Result<EventStreamWithQueue> {
+    pub fn spawn(self) -> Option<EventStreamWithQueue> {
         let queue = DispatchQueue::new("cardinal-sdk-queue", DispatchQueueAttr::SERIAL);
         unsafe { FSEventStreamSetDispatchQueue(self.stream, Some(&queue)) };
         let result = unsafe { FSEventStreamStart(self.stream) };
         if !result {
             unsafe { FSEventStreamStop(self.stream) };
             unsafe { FSEventStreamInvalidate(self.stream) };
-            bail!("fs event stream start failed.");
+            return None;
         }
         let stream = self.stream;
-        Ok(EventStreamWithQueue { stream, queue })
+        Some(EventStreamWithQueue { stream, queue })
     }
 
     // Get device id being watched by this event stream.

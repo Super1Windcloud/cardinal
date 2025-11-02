@@ -6,7 +6,6 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.69"
 bitflags = "2.9.0"
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
@@ -20,8 +19,6 @@ objc2-core-services = { version = "0.3.2", default-features = false, features = 
     "dispatch2",
     "libc",
 ] }
-chrono = "0.4.41"
-core-foundation = { version = "0.10.1", features = ["mac_os_10_8_features"] }
 dispatch2 = { version = "0.3.0", default-features = true, features = ["alloc"] }
 libc = "0.2.171"
 crossbeam-channel = "0.5"

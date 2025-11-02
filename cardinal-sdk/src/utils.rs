@@ -1,10 +1,12 @@
-use chrono::Utc;
 use libc::dev_t;
 use objc2_core_services::{FSEventsGetCurrentEventId, FSEventsGetLastEventIdForDeviceBeforeTime};
-use std::collections::HashMap;
+use std::{collections::HashMap, time::SystemTime};
 
 pub fn current_timestamp() -> i64 {
-    Utc::now().timestamp()
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_default()
 }
 
 pub fn current_event_id() -> u64 {
