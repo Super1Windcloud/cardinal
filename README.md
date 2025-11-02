@@ -5,7 +5,6 @@
   <p>
     <a href="#requirements">Requirements</a> ·
     <a href="#running-cardinal">Running Cardinal</a> ·
-    <a href="#testing--quality">Testing &amp; Quality</a> ·
     <a href="#contributing">Contributing</a>
   </p>
   <img src="doc/UI.gif" alt="Cardinal UI preview" width="720">
@@ -37,24 +36,6 @@ npm run tauri dev -- --release --features dev
 cd cardinal
 npm run tauri build
 ```
-
----
-
-## Testing & Quality
-
-Please run these before opening a pull request or cutting a release:
-
-```bash
-cargo fmt --all
-cargo clippy --workspace --all-targets -D warnings
-cargo test --workspace
-
-cd cardinal
-npm run format
-npm run build
-```
-
-For performance or rendering-sensitive changes, follow the profiling checklist in `doc/testing.md` (FPS capture, Safari/Chrome traces).
 
 ---
 
