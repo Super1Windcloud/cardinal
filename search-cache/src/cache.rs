@@ -289,7 +289,7 @@ impl SearchCache {
     ) -> Result<Vec<SlabIndex>> {
         let segments = query_segmentation(line);
         if segments.is_empty() {
-            bail!("Unprocessable query: {:?}", line);
+            bail!("Unprocessable query: {line:?}");
         }
         let matchers = build_segment_matchers(&segments, options)
             .map_err(|err| anyhow!("Invalid regex pattern: {err}"))?;
@@ -335,7 +335,6 @@ impl SearchCache {
                         if x.len() == 1 {
                             // Fast path for single node
                             nodes.push(*x.iter().next().unwrap());
-                            return;
                         } else {
                             // For each single distinct filename, sort all matching nodes by full path
                             // We only do it for each distinct filename(rather than collect all of them and sort) to reduce sorting overhead(as filenames are already sorted)
