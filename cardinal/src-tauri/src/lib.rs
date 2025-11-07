@@ -10,8 +10,8 @@ use background::{
 };
 use cardinal_sdk::EventWatcher;
 use commands::{
-    SearchJob, SearchState, get_app_status, get_nodes_info, open_in_finder, search, trigger_rescan,
-    update_icon_viewport,
+    SearchJob, SearchState, get_app_status, get_nodes_info, open_in_finder, preview_with_quicklook,
+    search, trigger_rescan, update_icon_viewport,
 };
 use crossbeam_channel::{Sender, bounded, unbounded};
 use lifecycle::{
@@ -129,7 +129,8 @@ pub fn run() -> Result<()> {
             update_icon_viewport,
             get_app_status,
             trigger_rescan,
-            open_in_finder
+            open_in_finder,
+            preview_with_quicklook
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -22,6 +22,8 @@
   --row-even: #ffffff;
   --row-odd: #f7f8fa;
   --row-hover: rgb(220, 220, 220);
+  --row-selected-bg: rgb(0, 100, 225);
+  --row-selected-hover-bg: rgb(0, 100, 225);
   --search-toggle-hover-bg: rgba(0, 0, 0, 0.06);
   /* Remove custom scrollbar color overrides. */
 
@@ -44,6 +46,11 @@
   --virtual-scrollbar-thumb-min: 24px; /* Shared JS/CSS scrollbar-thumb minimum height (overrideable). */
   /* Horizontal padding for header & data cells */
   --cell-hpad: 0.4rem;
+}
+
+:root[data-window-focused='false'] {
+  --row-selected-bg: rgb(220, 220, 220);
+  --row-selected-hover-bg: rgb(220, 220, 220);
 }
 
 * {
@@ -579,6 +586,14 @@ button:active {
   background-color: var(--row-hover);
 }
 
+.row-selected {
+  background-color: var(--row-selected-bg);
+}
+
+.row-selected:hover {
+  background-color: var(--row-selected-hover-bg);
+}
+
 .path-text {
   min-width: 0;
   overflow: hidden;
@@ -698,7 +713,14 @@ button:active {
     --row-even: rgb(32, 32, 32);
     --row-odd: rgb(43, 43, 42);
     --row-hover: rgb(70, 70, 70);
+    --row-selected-bg: rgb(0, 88, 209);
+    --row-selected-hover-bg: rgb(0, 88, 209);
     --search-toggle-hover-bg: rgba(255, 255, 255, 0.14);
+  }
+
+  :root:not([data-theme])[data-window-focused='false'] {
+    --row-selected-bg: rgb(70, 70, 70);
+    --row-selected-hover-bg: rgb(70, 70, 70);
   }
 
   :root:not([data-theme]) a:hover {
@@ -757,7 +779,14 @@ button:active {
   --row-even: rgb(32, 32, 32);
   --row-odd: rgb(43, 43, 42);
   --row-hover: rgb(70, 70, 70);
+  --row-selected-bg: rgb(0, 88, 209);
+  --row-selected-hover-bg: rgb(0, 88, 209);
   --search-toggle-hover-bg: rgba(255, 255, 255, 0.14);
+}
+
+:root[data-theme='dark'][data-window-focused='false'] {
+  --row-selected-bg: rgb(70, 70, 70);
+  --row-selected-hover-bg: rgb(70, 70, 70);
 }
 
 [data-theme='dark'] a:hover {

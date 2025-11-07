@@ -4,7 +4,7 @@ use base64::{Engine as _, engine::general_purpose};
 use crossbeam_channel::{Receiver, Sender};
 use search_cache::{SearchOptions, SearchResultNode, SlabIndex, SlabNodeMetadata};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{path::Path, process::Command};
 use tauri::State;
 
 #[derive(Debug, Clone, Copy, Deserialize, Default)]
@@ -185,7 +185,7 @@ pub fn open_in_finder(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let p = Path::new(&path);
-        std::process::Command::new("open")
+        Command::new("open")
             .arg("-R")
             .arg(p)
             .spawn()
@@ -216,4 +216,27 @@ pub fn open_in_finder(path: String) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn preview_with_quicklook(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if path.trim().is_empty() {
+            return Err("Path is empty".into());
+        }
+
+        let p = Path::new(&path);
+        Command::new("qlmanage")
+            .arg("-p")
+            .arg(p)
+            .spawn()
+            .map_err(|e| format!("Failed to launch Quick Look preview: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Err("Quick Look preview is only supported on macOS".into())
+    }
 }

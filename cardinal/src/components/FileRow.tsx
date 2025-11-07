@@ -11,6 +11,8 @@ type FileRowProps = {
   rowIndex: number;
   style?: CSSProperties;
   onContextMenu?: (event: ReactMouseEvent<HTMLDivElement>, path: string) => void;
+  onSelect?: (path: string) => void;
+  isSelected?: boolean;
   searchQuery?: string;
   caseInsensitive?: boolean;
 };
@@ -29,6 +31,8 @@ export const FileRow = memo(function FileRow({
   rowIndex,
   style,
   onContextMenu,
+  onSelect,
+  isSelected = false,
   searchQuery,
   caseInsensitive,
 }: FileRowProps): React.JSX.Element | null {
@@ -68,11 +72,28 @@ export const FileRow = memo(function FileRow({
     }
   };
 
+  const handleClick = () => {
+    if (path && onSelect) {
+      onSelect(path);
+    }
+  };
+
+  const rowClassName = [
+    'row',
+    'columns',
+    rowIndex % 2 === 0 ? 'row-even' : 'row-odd',
+    isSelected ? 'row-selected' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <div
       style={style}
-      className={`row columns ${rowIndex % 2 === 0 ? 'row-even' : 'row-odd'}`}
+      className={rowClassName}
       onContextMenu={handleContextMenu}
+      onClick={handleClick}
+      aria-selected={isSelected}
       title={path}
     >
       <div className="filename-column">

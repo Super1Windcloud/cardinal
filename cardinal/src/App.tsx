@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
-import type { ChangeEvent, CSSProperties } from 'react';
+import type { ChangeEvent, CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import './App.css';
 import { ContextMenu } from './components/ContextMenu';
 import { ColumnHeader } from './components/ColumnHeader';
@@ -19,6 +19,7 @@ import type { VirtualListHandle } from './components/VirtualList';
 import { StateDisplay } from './components/StateDisplay';
 import FSEventsPanel from './components/FSEventsPanel';
 import type { FSEventsPanelHandle } from './components/FSEventsPanel';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import {
@@ -54,6 +55,13 @@ function App() {
     lifecycleState,
   } = state;
   const [activeTab, setActiveTab] = useState<ActiveTab>('files');
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [isWindowFocused, setIsWindowFocused] = useState<boolean>(() => {
+    if (typeof document === 'undefined') {
+      return true;
+    }
+    return document.hasFocus();
+  });
   const eventsPanelRef = useRef<FSEventsPanelHandle | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const virtualListRef = useRef<VirtualListHandle | null>(null);
@@ -67,6 +75,9 @@ function App() {
     useRegex,
   });
   const { t } = useTranslation();
+  const handleRowSelect = useCallback((path: string) => {
+    setSelectedPath(path);
+  }, []);
 
   const {
     menu: filesMenu,
@@ -166,6 +177,66 @@ function App() {
     focusSearchInput();
   }, [focusSearchInput]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const handleWindowFocus = () => setIsWindowFocused(true);
+    const handleWindowBlur = () => setIsWindowFocused(false);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.documentElement.dataset.windowFocused = isWindowFocused ? 'true' : 'false';
+  }, [isWindowFocused]);
+
+  useEffect(() => {
+    if (activeTab !== 'files') {
+      setSelectedPath(null);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'files') {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isSpaceKey = event.code === 'Space' || event.key === ' ';
+      if (!isSpaceKey || event.repeat) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable) {
+          return;
+        }
+      }
+
+      if (!selectedPath) {
+        return;
+      }
+
+      event.preventDefault();
+      invoke('preview_with_quicklook', { path: selectedPath }).catch((error) => {
+        console.error('Failed to preview file with Quick Look', error);
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, selectedPath]);
+
   const onQueryChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
       const inputValue = e.target.value;
@@ -217,6 +288,14 @@ function App() {
     }
   }, []);
 
+  const handleRowContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>, path: string) => {
+      handleRowSelect(path);
+      showContextMenu(event, path);
+    },
+    [handleRowSelect, showContextMenu],
+  );
+
   const renderRow = useCallback(
     (rowIndex: number, item: SearchResultItem | undefined, rowStyle: CSSProperties) => (
       <FileRow
@@ -224,12 +303,14 @@ function App() {
         item={item}
         rowIndex={rowIndex}
         style={{ ...rowStyle, width: 'var(--columns-total)' }} // Enforce column width CSS vars for virtualization rows
-        onContextMenu={showContextMenu}
+        onContextMenu={handleRowContextMenu}
+        onSelect={handleRowSelect}
+        isSelected={item ? selectedPath === item.path : false}
         searchQuery={currentQuery}
         caseInsensitive={!caseSensitive}
       />
     ),
-    [showContextMenu, currentQuery, caseSensitive],
+    [handleRowContextMenu, handleRowSelect, selectedPath, currentQuery, caseSensitive],
   );
 
   const getDisplayState = (): 'loading' | 'error' | 'empty' | 'results' => {
