@@ -4,7 +4,7 @@ use base64::{Engine as _, engine::general_purpose};
 use crossbeam_channel::{Receiver, Sender};
 use search_cache::{SearchOptions, SearchResultNode, SlabIndex, SlabNodeMetadata};
 use serde::{Deserialize, Serialize};
-use std::{path::Path, process::Command};
+use std::process::Command;
 use tauri::State;
 
 #[derive(Debug, Clone, Copy, Deserialize, Default)]
@@ -182,61 +182,20 @@ pub async fn trigger_rescan(state: State<'_, SearchState>) -> Result<(), String>
 
 #[tauri::command]
 pub fn open_in_finder(path: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let p = Path::new(&path);
-        Command::new("open")
-            .arg("-R")
-            .arg(p)
-            .spawn()
-            .map_err(|e| format!("Failed to reveal path in Finder: {e}"))?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let p = Path::new(&path);
-        std::process::Command::new("explorer.exe")
-            .arg("/select,")
-            .arg(p)
-            .spawn()
-            .map_err(|e| format!("Failed to reveal path in Explorer: {}", e))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let p = Path::new(&path);
-        if let Some(parent) = p.parent() {
-            std::process::Command::new("xdg-open")
-                .arg(parent)
-                .spawn()
-                .map_err(|e| format!("Failed to open parent directory: {}", e))?;
-        } else {
-            std::process::Command::new("xdg-open")
-                .arg(p)
-                .spawn()
-                .map_err(|e| format!("Failed to open path: {}", e))?;
-        }
-    }
-    Ok(())
+    Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to reveal path in Finder: {e}"))?;
+    return Ok(());
 }
 
 #[tauri::command]
 pub fn preview_with_quicklook(path: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        if path.trim().is_empty() {
-            return Err("Path is empty".into());
-        }
-
-        let p = Path::new(&path);
-        Command::new("qlmanage")
-            .arg("-p")
-            .arg(p)
-            .spawn()
-            .map_err(|e| format!("Failed to launch Quick Look preview: {e}"))?;
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = path;
-        Err("Quick Look preview is only supported on macOS".into())
-    }
+    Command::new("qlmanage")
+        .arg("-p")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch Quick Look preview: {e}"))?;
+    Ok(())
 }
