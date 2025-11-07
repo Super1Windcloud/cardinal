@@ -259,6 +259,19 @@ function App() {
         invoke('open_in_finder', { path: selectedPath }).catch((error) => {
           console.error('Failed to reveal file in Finder', error);
         });
+        return;
+      }
+
+      if (key === 'c') {
+        if (activeTab !== 'files' || !selectedPath) {
+          return;
+        }
+        event.preventDefault();
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(selectedPath).catch((error) => {
+            console.error('Failed to copy file path', error);
+          });
+        }
       }
     };
 

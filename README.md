@@ -38,6 +38,7 @@ Both **case-sensitive** and **regular-expression** modes are available via the t
 - `Space` – Quick Look the currently selected row without leaving Cardinal.
 - `Cmd+R` – reveal the highlighted result in Finder.
 - `Cmd+F` – jump focus back to the search bar.
+- `Cmd+C` – copy the selected file's path to the clipboard.
 - `Cmd+Shift+Space` – toggle the Cardinal window globally via the quick-launch hotkey.
 
 Happy searching!
