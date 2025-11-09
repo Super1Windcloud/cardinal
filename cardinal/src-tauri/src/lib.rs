@@ -18,7 +18,7 @@ use lifecycle::{
 };
 use search_cache::{SearchCache, SearchResultNode, SlabIndex, WalkData};
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         LazyLock, Once,
         atomic::{AtomicBool, Ordering},
@@ -162,11 +162,12 @@ pub fn run() -> Result<()> {
             const WATCH_ROOT: &str = "/";
             const FSE_LATENCY_SECS: f64 = 0.1;
             let path = PathBuf::from(WATCH_ROOT);
+            let ignore_paths = vec![PathBuf::from("/System/Volumes/Data")];
 
             let mut cache = match SearchCache::try_read_persistent_cache(
                 &path,
                 &CACHE_PATH,
-                Some(Path::new("/System/Volumes/Data")),
+                Some(ignore_paths.clone()),
                 Some(&APP_QUIT),
             ) {
                 Ok(cached) => {
@@ -177,7 +178,7 @@ pub fn run() -> Result<()> {
                 Err(e) => {
                     info!("Walking filesystem: {:?}", e);
                     let walk_data = WalkData::new(
-                        Some(Path::new("/System/Volumes/Data")),
+                        Some(ignore_paths.clone()),
                         false,
                         Some(&APP_QUIT),
                     );
@@ -195,7 +196,7 @@ pub fn run() -> Result<()> {
                         let cache = SearchCache::walk_fs_with_walk_data(
                             path.clone(),
                             &walk_data,
-                            Some(Path::new("/System/Volumes/Data")),
+                            Some(ignore_paths.clone()),
                             Some(&APP_QUIT),
                         );
 

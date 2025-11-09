@@ -6,7 +6,7 @@ use std::{
     io::{Error, ErrorKind},
     num::NonZeroU64,
     os::unix::fs::MetadataExt,
-    path::Path,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     time::UNIX_EPOCH,
 };
@@ -86,7 +86,7 @@ pub struct WalkData<'w> {
     pub num_dirs: AtomicUsize,
     /// Cancellation will be checked periodically.
     cancel: Option<&'w AtomicBool>,
-    ignore_directory: Option<&'w Path>,
+    ignore_directories: Option<Vec<PathBuf>>,
     /// If set, metadata will be collected for each file node(folder node will get free metadata).
     need_metadata: bool,
 }
@@ -97,13 +97,13 @@ impl<'w> WalkData<'w> {
             num_files: AtomicUsize::new(0),
             num_dirs: AtomicUsize::new(0),
             cancel: None,
-            ignore_directory: None,
+            ignore_directories: None,
             need_metadata,
         }
     }
 
-    pub const fn new(
-        ignore_directory: Option<&'w Path>,
+    pub fn new(
+        ignore_directories: Option<Vec<PathBuf>>,
         need_metadata: bool,
         cancel: Option<&'w AtomicBool>,
     ) -> Self {
@@ -111,9 +111,16 @@ impl<'w> WalkData<'w> {
             num_files: AtomicUsize::new(0),
             num_dirs: AtomicUsize::new(0),
             cancel,
-            ignore_directory,
+            ignore_directories,
             need_metadata,
         }
+    }
+
+    fn should_ignore(&self, path: &Path) -> bool {
+        self.ignore_directories
+            .as_ref()
+            .map(|paths| paths.iter().any(|ignore| ignore == path))
+            .unwrap_or(false)
     }
 }
 
@@ -122,7 +129,7 @@ pub fn walk_it(dir: &Path, walk_data: &WalkData) -> Option<Node> {
 }
 
 fn walk(path: &Path, walk_data: &WalkData) -> Option<Node> {
-    if walk_data.ignore_directory == Some(path) {
+    if walk_data.should_ignore(path) {
         return None;
     }
     // doesn't traverse symlink
@@ -157,7 +164,7 @@ fn walk(path: &Path, walk_data: &WalkData) -> Option<Node> {
                             {
                                 return None;
                             }
-                            if walk_data.ignore_directory == Some(path) {
+                            if walk_data.should_ignore(path) {
                                 return None;
                             }
                             // doesn't traverse symlink
@@ -359,7 +366,11 @@ mod tests {
     #[ignore]
     fn test_search_root() {
         let done = AtomicBool::new(false);
-        let walk_data = WalkData::new(Some(Path::new("/System/Volumes/Data")), false, None);
+        let walk_data = WalkData::new(
+            Some(vec![PathBuf::from("/System/Volumes/Data")]),
+            false,
+            None,
+        );
         std::thread::scope(|s| {
             s.spawn(|| {
                 let node = walk_it(Path::new("/"), &walk_data).unwrap();
@@ -381,7 +392,11 @@ mod tests {
     #[ignore]
     fn test_search_simulator() {
         let done = AtomicBool::new(false);
-        let walk_data = WalkData::new(Some(Path::new("/System/Volumes/Data")), true, None);
+        let walk_data = WalkData::new(
+            Some(vec![PathBuf::from("/System/Volumes/Data")]),
+            true,
+            None,
+        );
         std::thread::scope(|s| {
             s.spawn(|| {
                 let node = walk_it(
@@ -408,7 +423,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let done = AtomicBool::new(false);
         let walk_data = WalkData::new(
-            Some(Path::new("/System/Volumes/Data")),
+            Some(vec![PathBuf::from("/System/Volumes/Data")]),
             false,
             Some(&cancel),
         );

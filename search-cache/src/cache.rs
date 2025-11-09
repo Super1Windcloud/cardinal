@@ -27,7 +27,7 @@ pub struct SearchCache {
     slab_root: SlabIndex,
     slab: ThinSlab<SlabNode>,
     name_index: NameIndex,
-    ignore_path: Option<&'static Path>,
+    ignore_paths: Option<Vec<PathBuf>>,
     cancel: Option<&'static AtomicBool>,
 }
 
@@ -133,7 +133,7 @@ impl SearchCache {
     pub fn try_read_persistent_cache(
         path: &Path,
         cache_path: &Path,
-        ignore_path: Option<&'static Path>,
+        ignore_paths: Option<Vec<PathBuf>>,
         cancel: Option<&'static AtomicBool>,
     ) -> Result<Self> {
         read_cache_from_file(cache_path)
@@ -166,7 +166,7 @@ impl SearchCache {
                         slab_root,
                         slab,
                         name_index,
-                        ignore_path,
+                        ignore_paths,
                         cancel,
                     )
                 },
@@ -178,11 +178,16 @@ impl SearchCache {
         self.slab.len()
     }
 
-    pub fn walk_fs_with_ignore(path: PathBuf, ignore_path: &'static Path) -> Self {
+    pub fn walk_fs_with_ignore(path: PathBuf, ignore_paths: Vec<PathBuf>) -> Self {
+        let ignore_paths_opt = if ignore_paths.is_empty() {
+            None
+        } else {
+            Some(ignore_paths)
+        };
         Self::walk_fs_with_walk_data(
             path,
-            &WalkData::new(Some(ignore_path), false, None),
-            Some(ignore_path),
+            &WalkData::new(ignore_paths_opt.clone(), false, None),
+            ignore_paths_opt,
             None,
         )
         .unwrap()
@@ -197,7 +202,7 @@ impl SearchCache {
     pub fn walk_fs_with_walk_data(
         path: PathBuf,
         walk_data: &WalkData,
-        ignore_path: Option<&'static Path>,
+        ignore_paths: Option<Vec<PathBuf>>,
         cancel: Option<&'static AtomicBool>,
     ) -> Option<Self> {
         // Return None if cancelled
@@ -249,7 +254,7 @@ impl SearchCache {
             slab_root,
             slab,
             name_index,
-            ignore_path,
+            ignore_paths,
             cancel,
         ))
     }
@@ -260,7 +265,7 @@ impl SearchCache {
         slab_root: SlabIndex,
         slab: ThinSlab<SlabNode>,
         name_index: NameIndex,
-        ignore_path: Option<&'static Path>,
+        ignore_paths: Option<Vec<PathBuf>>,
         cancel: Option<&'static AtomicBool>,
     ) -> Self {
         Self {
@@ -269,7 +274,7 @@ impl SearchCache {
             slab_root,
             slab,
             name_index,
-            ignore_path,
+            ignore_paths,
             cancel,
         }
     }
@@ -485,7 +490,7 @@ impl SearchCache {
             self.remove_node(old_node);
         }
         // For incremental data, we need metadata
-        let walk_data = WalkData::new(self.ignore_path, true, self.cancel);
+        let walk_data = WalkData::new(self.ignore_paths.clone(), true, self.cancel);
         walk_it(raw_path, &walk_data).map(|node| {
             let node = self.create_node_slab_update_name_index_and_name_pool(Some(parent), &node);
             // Push the newly created node to the parent's children
@@ -511,14 +516,14 @@ impl SearchCache {
     }
 
     pub fn walk_data(&self) -> WalkData<'static> {
-        WalkData::new(self.ignore_path, false, self.cancel)
+        WalkData::new(self.ignore_paths.clone(), false, self.cancel)
     }
 
     pub fn rescan_with_walk_data(&mut self, walk_data: &WalkData) -> Option<()> {
         let Some(new_cache) = Self::walk_fs_with_walk_data(
             self.path.clone(),
             walk_data,
-            self.ignore_path,
+            self.ignore_paths.clone(),
             self.cancel,
         ) else {
             info!("Rescan cancelled.");
@@ -532,8 +537,8 @@ impl SearchCache {
         // Remove all memory consuming cache early for memory consumption in Self::walk_fs_new.
         let Some(new_cache) = Self::walk_fs_with_walk_data(
             self.path.clone(),
-            &WalkData::new(self.ignore_path, false, self.cancel),
-            self.ignore_path,
+            &WalkData::new(self.ignore_paths.clone(), false, self.cancel),
+            self.ignore_paths.clone(),
             self.cancel,
         ) else {
             info!("Rescan cancelled.");
@@ -571,7 +576,7 @@ impl SearchCache {
             slab_root,
             slab,
             name_index,
-            ignore_path: _,
+            ignore_paths: _,
             cancel: _,
         } = self;
         let name_index = name_index.into_persistent();
