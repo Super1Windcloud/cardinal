@@ -292,7 +292,7 @@ function App() {
 
   const onQueryChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
-      const inputValue = e.target.value;
+      const inputValue = e.target.value.trim();
 
       if (activeTab === 'events') {
         setEventFilterQuery(inputValue);
