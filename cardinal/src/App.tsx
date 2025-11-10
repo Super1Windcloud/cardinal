@@ -2,8 +2,10 @@ import { useRef, useCallback, useEffect, useState } from 'react';
 import type { ChangeEvent, CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import './App.css';
 import { ContextMenu } from './components/ContextMenu';
-import { ColumnHeader } from './components/ColumnHeader';
 import { FileRow } from './components/FileRow';
+import { SearchBar } from './components/SearchBar';
+import { FilesTabContent } from './components/FilesTabContent';
+import { PermissionOverlay } from './components/PermissionOverlay';
 import StatusBar from './components/StatusBar';
 import type { StatusTabKey } from './components/StatusBar';
 import type { SearchResultItem } from './types/search';
@@ -14,9 +16,7 @@ import { useFileSearch } from './hooks/useFileSearch';
 import { useEventColumnWidths } from './hooks/useEventColumnWidths';
 import { useRecentFSEvents } from './hooks/useRecentFSEvents';
 import { ROW_HEIGHT, OVERSCAN_ROW_COUNT } from './constants';
-import { VirtualList } from './components/VirtualList';
 import type { VirtualListHandle } from './components/VirtualList';
-import { StateDisplay } from './components/StateDisplay';
 import FSEventsPanel from './components/FSEventsPanel';
 import type { FSEventsPanelHandle } from './components/FSEventsPanel';
 import { invoke } from '@tauri-apps/api/core';
@@ -93,7 +93,12 @@ function App() {
       const nextSlab = results[rowIndex] ?? null;
 
       setSelectedRow((prev) => {
-        if (prev && prev.index === rowIndex && prev.slab === nextSlab && prev.path === resolvedPath) {
+        if (
+          prev &&
+          prev.index === rowIndex &&
+          prev.slab === nextSlab &&
+          prev.path === resolvedPath
+        ) {
           return prev;
         }
         return {
@@ -586,55 +591,30 @@ function App() {
     : t('app.fullDiskAccess.status.disabled');
   const caseSensitiveLabel = t('search.options.caseSensitive');
   const regexLabel = t('search.options.regex');
+  const searchPlaceholder =
+    activeTab === 'files' ? t('search.placeholder.files') : t('search.placeholder.events');
+  const permissionSteps = [
+    t('app.fullDiskAccess.steps.one'),
+    t('app.fullDiskAccess.steps.two'),
+    t('app.fullDiskAccess.steps.three'),
+  ];
+  const openSettingsLabel = t('app.fullDiskAccess.openSettings');
 
   return (
     <>
       <main className="container" aria-hidden={showFullDiskAccessOverlay}>
-        <div className="search-container">
-          <div className="search-bar">
-            <input
-              id="search-input"
-              ref={searchInputRef}
-              value={searchInputValue}
-              onChange={onQueryChange}
-              placeholder={
-                activeTab === 'files'
-                  ? t('search.placeholder.files')
-                  : t('search.placeholder.events')
-              }
-              spellCheck={false}
-              autoCorrect="off"
-              autoComplete="off"
-              autoCapitalize="off"
-            />
-            <div className="search-options">
-              <label className="search-option" title={caseSensitiveLabel}>
-                <input
-                  type="checkbox"
-                  checked={caseSensitive}
-                  onChange={onToggleCaseSensitive}
-                  aria-label={caseSensitiveLabel}
-                />
-                <span className="search-option__display" aria-hidden="true">
-                  Aa
-                </span>
-                <span className="sr-only">{caseSensitiveLabel}</span>
-              </label>
-              <label className="search-option" title={regexLabel}>
-                <input
-                  type="checkbox"
-                  checked={useRegex}
-                  onChange={onToggleRegex}
-                  aria-label={regexLabel}
-                />
-                <span className="search-option__display" aria-hidden="true">
-                  .*
-                </span>
-                <span className="sr-only">{regexLabel}</span>
-              </label>
-            </div>
-          </div>
-        </div>
+        <SearchBar
+          inputRef={searchInputRef}
+          value={searchInputValue}
+          placeholder={searchPlaceholder}
+          onChange={onQueryChange}
+          caseSensitive={caseSensitive}
+          useRegex={useRegex}
+          onToggleCaseSensitive={onToggleCaseSensitive}
+          onToggleRegex={onToggleRegex}
+          caseSensitiveLabel={caseSensitiveLabel}
+          regexLabel={regexLabel}
+        />
         <div className="results-container" style={containerStyle}>
           {activeTab === 'events' ? (
             <FSEventsPanel
@@ -647,32 +627,20 @@ function App() {
               caseInsensitive={!caseSensitive}
             />
           ) : (
-            <div className="scroll-area">
-              <ColumnHeader
-                ref={headerRef}
-                onResizeStart={onResizeStart}
-                onContextMenu={showHeaderContextMenu}
-              />
-              <div className="flex-fill">
-                {displayState !== 'results' ? (
-                  <StateDisplay
-                    state={displayState}
-                    message={searchErrorMessage}
-                    query={currentQuery}
-                  />
-                ) : (
-                  <VirtualList
-                    ref={virtualListRef}
-                    results={results}
-                    rowHeight={ROW_HEIGHT}
-                    overscan={OVERSCAN_ROW_COUNT}
-                    renderRow={renderRow}
-                    onScrollSync={handleHorizontalSync}
-                    className="virtual-list"
-                  />
-                )}
-              </div>
-            </div>
+            <FilesTabContent
+              headerRef={headerRef}
+              onResizeStart={onResizeStart}
+              onHeaderContextMenu={showHeaderContextMenu}
+              displayState={displayState}
+              searchErrorMessage={searchErrorMessage}
+              currentQuery={currentQuery}
+              virtualListRef={virtualListRef}
+              results={results}
+              rowHeight={ROW_HEIGHT}
+              overscan={OVERSCAN_ROW_COUNT}
+              renderRow={renderRow}
+              onScrollSync={handleHorizontalSync}
+            />
           )}
         </div>
         {menu.visible && (
@@ -690,29 +658,15 @@ function App() {
         />
       </main>
       {showFullDiskAccessOverlay && (
-        <div className="permission-overlay">
-          <div className="permission-card" role="dialog" aria-modal="true">
-            <h1>{t('app.fullDiskAccess.title')}</h1>
-            <p>{t('app.fullDiskAccess.description')}</p>
-            <ol>
-              <li>{t('app.fullDiskAccess.steps.one')}</li>
-              <li>{t('app.fullDiskAccess.steps.two')}</li>
-              <li>{t('app.fullDiskAccess.steps.three')}</li>
-            </ol>
-            <p className="permission-status" role="status" aria-live="polite">
-              {overlayStatusMessage}
-            </p>
-            <div className="permission-actions">
-              <button
-                type="button"
-                onClick={requestFullDiskAccessPermission}
-                disabled={isCheckingFullDiskAccess}
-              >
-                {t('app.fullDiskAccess.openSettings')}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PermissionOverlay
+          title={t('app.fullDiskAccess.title')}
+          description={t('app.fullDiskAccess.description')}
+          steps={permissionSteps}
+          statusMessage={overlayStatusMessage}
+          onRequestPermission={requestFullDiskAccessPermission}
+          disabled={isCheckingFullDiskAccess}
+          actionLabel={openSettingsLabel}
+        />
       )}
     </>
   );

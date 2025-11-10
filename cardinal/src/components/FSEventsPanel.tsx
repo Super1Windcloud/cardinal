@@ -56,7 +56,7 @@ const splitPath = (path: string | undefined): { name: string; directory: string 
   return { name, directory };
 };
 
-const EventRow = memo(function EventRow({
+const EventRowBase = ({
   index,
   style,
   events,
@@ -64,7 +64,7 @@ const EventRow = memo(function EventRow({
   searchQuery,
   caseInsensitive,
   ariaAttributes,
-}: EventRowProps): React.JSX.Element {
+}: EventRowProps): React.ReactElement => {
   const event = events[index];
   const pathSource = event?.path ?? '';
   const { name, directory } = splitPath(pathSource);
@@ -104,9 +104,12 @@ const EventRow = memo(function EventRow({
       </span>
     </div>
   );
-});
+};
 
+const EventRow = memo(EventRowBase);
 EventRow.displayName = 'EventRow';
+
+const renderEventRow = (props: EventRowProps): React.ReactElement => <EventRow {...props} />;
 
 type FSEventsPanelProps = {
   events: FileSystemEvent[];
@@ -283,7 +286,7 @@ const FSEventsPanel = forwardRef<FSEventsPanelHandle, FSEventsPanelProps>(
               {listSize.width > 0 && listSize.height > 0 && (
                 <List
                   listRef={attachScrollContainer}
-                  rowComponent={EventRow}
+                  rowComponent={renderEventRow}
                   rowCount={events.length}
                   rowHeight={ROW_HEIGHT}
                   rowProps={rowProps}
