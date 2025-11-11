@@ -1,5 +1,6 @@
 use crate::{
-    NameIndex, SearchResultNode, SlabIndex, SlabNode, SlabNodeMetadataCompact, State, ThinSlab,
+    FileNodes, NameIndex, SearchOptions, SearchResultNode, SegmentKind, SegmentMatcher, SlabIndex,
+    SlabNode, SlabNodeMetadataCompact, State, ThinSlab, build_segment_matchers,
     persistent::{PersistentStorage, read_cache_from_file, write_cache_to_file},
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -7,8 +8,7 @@ use cardinal_sdk::{EventFlag, FsEvent, ScanType, current_event_id};
 use fswalk::{Node, NodeMetadata, WalkData, walk_it};
 use hashbrown::HashSet;
 use namepool::NamePool;
-use query_segmentation::{Segment, query_segmentation};
-use regex::{Regex, RegexBuilder};
+use query_segmentation::query_segmentation;
 use std::{
     collections::BTreeSet,
     ffi::OsStr,
@@ -22,107 +22,20 @@ use tracing::{debug, info};
 use typed_num::Num;
 
 pub struct SearchCache {
-    path: PathBuf,
+    file_nodes: FileNodes,
     last_event_id: u64,
-    slab_root: SlabIndex,
-    slab: ThinSlab<SlabNode>,
     name_index: NameIndex,
     ignore_paths: Option<Vec<PathBuf>>,
     cancel: Option<&'static AtomicBool>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SearchOptions {
-    pub use_regex: bool,
-    pub case_insensitive: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum SegmentKind {
-    Substr,
-    Prefix,
-    Suffix,
-    Exact,
-}
-
-enum SegmentMatcher {
-    Plain { kind: SegmentKind, needle: String },
-    Regex { regex: Regex },
-}
-
-impl SegmentMatcher {
-    fn matches(&self, candidate: &str) -> bool {
-        match self {
-            SegmentMatcher::Plain { kind, needle } => match kind {
-                SegmentKind::Substr => candidate.contains(needle),
-                SegmentKind::Prefix => candidate.starts_with(needle),
-                SegmentKind::Suffix => candidate.ends_with(needle),
-                SegmentKind::Exact => candidate == needle,
-            },
-            SegmentMatcher::Regex { regex } => regex.is_match(candidate),
-        }
-    }
-}
-
-fn segment_kind(segment: &Segment<'_>) -> SegmentKind {
-    match segment {
-        Segment::Substr(_) => SegmentKind::Substr,
-        Segment::Prefix(_) => SegmentKind::Prefix,
-        Segment::Suffix(_) => SegmentKind::Suffix,
-        Segment::Exact(_) => SegmentKind::Exact,
-    }
-}
-
-fn segment_value<'s>(segment: &Segment<'s>) -> &'s str {
-    match segment {
-        Segment::Substr(value)
-        | Segment::Prefix(value)
-        | Segment::Suffix(value)
-        | Segment::Exact(value) => value,
-    }
-}
-
-fn build_segment_matchers(
-    segments: &[Segment<'_>],
-    options: SearchOptions,
-) -> Result<Vec<SegmentMatcher>, regex::Error> {
-    segments
-        .iter()
-        .map(|segment| {
-            let kind = segment_kind(segment);
-            let value = segment_value(segment);
-            if options.use_regex || options.case_insensitive {
-                let base = if options.use_regex {
-                    value.to_owned()
-                } else {
-                    regex::escape(value)
-                };
-                let pattern = match kind {
-                    SegmentKind::Substr => base,
-                    SegmentKind::Prefix => format!("^(?:{base})"),
-                    SegmentKind::Suffix => format!("(?:{base})$"),
-                    SegmentKind::Exact => format!("^(?:{base})$"),
-                };
-                let mut builder = RegexBuilder::new(&pattern);
-                builder.case_insensitive(options.case_insensitive);
-                builder.build().map(|regex| SegmentMatcher::Regex { regex })
-            } else {
-                Ok(SegmentMatcher::Plain {
-                    kind,
-                    needle: value.to_string(),
-                })
-            }
-        })
-        .collect()
-}
-
 impl std::fmt::Debug for SearchCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SearchCache")
-            .field("path", &self.path)
+            .field("path", &self.file_nodes.path())
             .field("last_event_id", &self.last_event_id)
-            .field("slab_root", &self.slab_root)
-            .field("slab.len()", &self.slab.len())
+            .field("slab_root", &self.file_nodes.root())
+            .field("slab.len()", &self.file_nodes.len())
             .field("name_index.len()", &self.name_index.len())
             .finish()
     }
@@ -160,22 +73,15 @@ impl SearchCache {
                  }| {
                     // name pool construction speed is fast enough that caching it doesn't worth it.
                     let name_index = NameIndex::construct_name_pool(name_index);
-                    Self::new(
-                        path,
-                        last_event_id,
-                        slab_root,
-                        slab,
-                        name_index,
-                        ignore_paths,
-                        cancel,
-                    )
+                    let slab = FileNodes::new(path, slab, slab_root);
+                    Self::new(slab, last_event_id, name_index, ignore_paths, cancel)
                 },
             )
     }
 
     /// Get the total number of files and directories in the cache.
     pub fn get_total_files(&self) -> usize {
-        self.slab.len()
+        self.file_nodes.len()
     }
 
     pub fn walk_fs_with_ignore(path: PathBuf, ignore_paths: Vec<PathBuf>) -> Self {
@@ -209,7 +115,7 @@ impl SearchCache {
         fn walkfs_to_slab(
             path: &Path,
             walk_data: &WalkData,
-        ) -> Option<(SlabIndex, ThinSlab<SlabNode>)> {
+        ) -> Option<(SlabIndex, ThinSlab<SlabNode>, NameIndex)> {
             // Build the tree of file names in parallel first (we cannot construct the slab directly
             // because slab nodes reference each other and we prefer to avoid locking).
             let visit_time = Instant::now();
@@ -223,36 +129,25 @@ impl SearchCache {
             // Then create the slab.
             let slab_time = Instant::now();
             let mut slab = ThinSlab::new();
-            let slab_root = construct_node_slab(None, &node, &mut slab);
+            let mut name_index = NameIndex::default();
+            let slab_root = construct_node_slab_name_index(None, &node, &mut slab, &mut name_index);
             info!(
-                "Slab construction time: {:?}, slab root: {:?}, slab len: {:?}",
+                "Slab & NameIndex construction time: {:?}, slab root: {:?}, slab len: {:?}",
                 slab_time.elapsed(),
                 slab_root,
                 slab.len()
             );
 
-            Some((slab_root, slab))
-        }
-        fn construct_name_index(slab: &ThinSlab<SlabNode>) -> NameIndex {
-            let name_index_time = Instant::now();
-            let name_index = NameIndex::from_slab(slab);
-            info!(
-                "Name index construction time: {:?}, len: {}",
-                name_index_time.elapsed(),
-                name_index.len()
-            );
-            name_index
+            Some((slab_root, slab, name_index))
         }
 
         let last_event_id = current_event_id();
-        let (slab_root, slab) = walkfs_to_slab(&path, walk_data)?;
-        let name_index = construct_name_index(&slab);
+        let (slab_root, slab, name_index) = walkfs_to_slab(&path, walk_data)?;
+        let slab = FileNodes::new(path, slab, slab_root);
         // metadata cache inits later
         Some(Self::new(
-            path,
-            last_event_id,
-            slab_root,
             slab,
+            last_event_id,
             name_index,
             ignore_paths,
             cancel,
@@ -260,19 +155,15 @@ impl SearchCache {
     }
 
     fn new(
-        path: PathBuf,
+        slab: FileNodes,
         last_event_id: u64,
-        slab_root: SlabIndex,
-        slab: ThinSlab<SlabNode>,
         name_index: NameIndex,
         ignore_paths: Option<Vec<PathBuf>>,
         cancel: Option<&'static AtomicBool>,
     ) -> Self {
         Self {
-            path,
+            file_nodes: slab,
             last_event_id,
-            slab_root,
-            slab,
             name_index,
             ignore_paths,
             cancel,
@@ -304,11 +195,11 @@ impl SearchCache {
             if let Some(nodes) = &node_set {
                 let mut new_node_set = Vec::with_capacity(nodes.len());
                 for &node in nodes {
-                    let mut child_matches = self.slab[node]
+                    let mut child_matches = self.file_nodes[node]
                         .children
                         .iter()
                         .filter_map(|&child| {
-                            let name = self.slab[child].name_and_parent.as_str();
+                            let name = self.file_nodes[child].name_and_parent.as_str();
                             if matcher.matches(name) {
                                 Some((name, child))
                             } else {
@@ -337,21 +228,7 @@ impl SearchCache {
                 names.into_iter().for_each(|name| {
                     // namepool doesn't shrink, so it can contains non-existng names. Therefore, we don't error out on None branch here.
                     if let Some(x) = self.name_index.get(name) {
-                        if x.len() == 1 {
-                            // Fast path for single node
-                            nodes.push(*x.iter().next().unwrap());
-                        } else {
-                            // For each single distinct filename, sort all matching nodes by full path
-                            // We only do it for each distinct filename(rather than collect all of them and sort) to reduce sorting overhead(as filenames are already sorted)
-                            let mut node_paths = x
-                                .iter()
-                                .copied()
-                                .filter_map(|x| self.node_path(x).map(|path| (path, x)))
-                                .collect::<Vec<_>>();
-                            node_paths
-                                .sort_unstable_by(|(path_a, _), (path_b, _)| path_a.cmp(path_b));
-                            nodes.extend(node_paths.into_iter().map(|(_, index)| index));
-                        }
+                        nodes.extend(x.iter());
                     }
                 });
                 node_set = Some(nodes);
@@ -365,35 +242,27 @@ impl SearchCache {
 
     /// Get the path of the node in the slab.
     pub fn node_path(&self, index: SlabIndex) -> Option<PathBuf> {
-        let mut current = index;
-        let mut segments = vec![];
-        while let Some(parent) = self.slab.get(current)?.name_and_parent.parent() {
-            segments.push(self.slab.get(current)?.name_and_parent.as_str());
-            current = parent;
-        }
-        Some(
-            self.path
-                .iter()
-                .chain(segments.iter().rev().map(OsStr::new))
-                .collect(),
-        )
+        self.file_nodes.node_path(index)
     }
 
     /// Locate the slab index for a path relative to the watch root.
     pub fn node_index_for_relative_path(&self, relative: &Path) -> Option<SlabIndex> {
-        let mut current = self.slab_root;
+        let mut current = self.file_nodes.root();
         if relative.as_os_str().is_empty() {
             return Some(current);
         }
         for segment in relative.components().map(|component| component.as_os_str()) {
-            let next = self.slab[current].children.iter().find_map(|&child| {
-                let name = self.slab[child].name_and_parent.as_str();
-                if OsStr::new(name) == segment {
-                    Some(child)
-                } else {
-                    None
-                }
-            })?;
+            let next = self.file_nodes[current]
+                .children
+                .iter()
+                .find_map(|&child| {
+                    let name = self.file_nodes[child].name_and_parent.as_str();
+                    if OsStr::new(name) == segment {
+                        Some(child)
+                    } else {
+                        None
+                    }
+                })?;
             current = next;
         }
         Some(current)
@@ -401,25 +270,26 @@ impl SearchCache {
 
     /// Locate the slab index for an absolute path when it belongs to the watch root.
     pub fn node_index_for_raw_path(&self, raw_path: &Path) -> Option<SlabIndex> {
-        let relative = raw_path.strip_prefix(&self.path).ok()?;
+        let relative = raw_path.strip_prefix(self.file_nodes.path()).ok()?;
         self.node_index_for_relative_path(relative)
     }
 
     fn push_node(&mut self, node: SlabNode) -> SlabIndex {
         let node_name = node.name_and_parent;
-        let index = self.slab.insert(node);
-        self.name_index.add_index(node_name.as_str(), index);
+        let index = self.file_nodes.insert(node);
+        self.name_index
+            .add_index(node_name.as_str(), index, &self.file_nodes);
         index
     }
 
     /// Removes a node by path and its children recursively.
     fn remove_node_path(&mut self, path: &Path) -> Option<SlabIndex> {
-        let mut current = self.slab_root;
+        let mut current = self.file_nodes.root();
         for name in path.components().map(|x| x.as_os_str()) {
-            if let Some(&index) = self.slab[current]
+            if let Some(&index) = self.file_nodes[current]
                 .children
                 .iter()
-                .find(|&&x| self.slab[x].name_and_parent.as_str() == name)
+                .find(|&&x| self.file_nodes[x].name_and_parent.as_str() == name)
             {
                 current = index;
             } else {
@@ -432,14 +302,14 @@ impl SearchCache {
 
     // Blindly try create node chain, it doesn't check if the path is really exist on disk.
     fn create_node_chain(&mut self, path: &Path) -> SlabIndex {
-        let mut current = self.slab_root;
-        let mut current_path = self.path.clone();
+        let mut current = self.file_nodes.root();
+        let mut current_path = self.file_nodes.path().to_path_buf();
         for name in path.components().map(|x| x.as_os_str()) {
             current_path.push(name);
-            current = if let Some(&index) = self.slab[current]
+            current = if let Some(&index) = self.file_nodes[current]
                 .children
                 .iter()
-                .find(|&&x| self.slab[x].name_and_parent.as_str() == name)
+                .find(|&&x| self.file_nodes[x].name_and_parent.as_str() == name)
             {
                 index
             } else {
@@ -457,7 +327,7 @@ impl SearchCache {
                     },
                 );
                 let index = self.push_node(node);
-                self.slab[current].add_children(index);
+                self.file_nodes[current].add_children(index);
                 index
             };
         }
@@ -469,7 +339,7 @@ impl SearchCache {
     // - Procedure contains metadata fetching, if metadata fetching failed, None is returned.
     fn scan_path_recursive(&mut self, raw_path: &Path) -> Option<SlabIndex> {
         // Ensure path is under the watch root
-        let Ok(path) = raw_path.strip_prefix(&self.path) else {
+        let Ok(path) = raw_path.strip_prefix(self.file_nodes.path()) else {
             return None;
         };
         if raw_path.symlink_metadata().err().map(|e| e.kind()) == Some(ErrorKind::NotFound) {
@@ -482,11 +352,9 @@ impl SearchCache {
         // Ensure node of the path parent is existed
         let parent = self.create_node_chain(parent);
         // Remove node(if exists) and do a full rescan
-        if let Some(&old_node) = self.slab[parent]
-            .children
-            .iter()
-            .find(|&&x| path.file_name() == Some(OsStr::new(self.slab[x].name_and_parent.as_str())))
-        {
+        if let Some(&old_node) = self.file_nodes[parent].children.iter().find(|&&x| {
+            path.file_name() == Some(OsStr::new(self.file_nodes[x].name_and_parent.as_str()))
+        }) {
             self.remove_node(old_node);
         }
         // For incremental data, we need metadata
@@ -494,7 +362,7 @@ impl SearchCache {
         walk_it(raw_path, &walk_data).map(|node| {
             let node = self.create_node_slab_update_name_index_and_name_pool(Some(parent), &node);
             // Push the newly created node to the parent's children
-            self.slab[parent].add_children(node);
+            self.file_nodes[parent].add_children(node);
             node
         })
     }
@@ -505,7 +373,7 @@ impl SearchCache {
     #[allow(dead_code)]
     fn scan_path_nonrecursive(&mut self, raw_path: &Path) -> Option<SlabIndex> {
         // Ensure path is under the watch root
-        let Ok(path) = raw_path.strip_prefix(&self.path) else {
+        let Ok(path) = raw_path.strip_prefix(self.file_nodes.path()) else {
             return None;
         };
         if raw_path.symlink_metadata().err().map(|e| e.kind()) == Some(ErrorKind::NotFound) {
@@ -521,7 +389,7 @@ impl SearchCache {
 
     pub fn rescan_with_walk_data(&mut self, walk_data: &WalkData) -> Option<()> {
         let Some(new_cache) = Self::walk_fs_with_walk_data(
-            self.path.clone(),
+            self.file_nodes.path().to_path_buf(),
             walk_data,
             self.ignore_paths.clone(),
             self.cancel,
@@ -536,7 +404,7 @@ impl SearchCache {
     pub fn rescan(&mut self) {
         // Remove all memory consuming cache early for memory consumption in Self::walk_fs_new.
         let Some(new_cache) = Self::walk_fs_with_walk_data(
-            self.path.clone(),
+            self.file_nodes.path().to_path_buf(),
             &WalkData::new(self.ignore_paths.clone(), false, self.cancel),
             self.ignore_paths.clone(),
             self.cancel,
@@ -550,7 +418,7 @@ impl SearchCache {
     /// Removes a node and its children recursively by index.
     fn remove_node(&mut self, index: SlabIndex) {
         fn remove_single_node(cache: &mut SearchCache, index: SlabIndex) {
-            if let Some(node) = cache.slab.try_remove(index) {
+            if let Some(node) = cache.file_nodes.try_remove(index) {
                 let removed = cache
                     .name_index
                     .remove_index(node.name_and_parent.as_str(), index);
@@ -559,26 +427,25 @@ impl SearchCache {
         }
 
         // Remove parent reference, make whole subtree unreachable.
-        if let Some(parent) = self.slab[index].name_and_parent.parent() {
-            self.slab[parent].children.retain(|&x| x != index);
+        if let Some(parent) = self.file_nodes[index].name_and_parent.parent() {
+            self.file_nodes[parent].children.retain(|&x| x != index);
         }
         let mut stack = vec![index];
         while let Some(current) = stack.pop() {
-            stack.extend_from_slice(&self.slab[current].children);
+            stack.extend_from_slice(&self.file_nodes[current].children);
             remove_single_node(self, current);
         }
     }
 
     pub fn flush_to_file(self, cache_path: &Path) -> Result<()> {
         let Self {
-            path,
+            file_nodes: slab,
             last_event_id,
-            slab_root,
-            slab,
             name_index,
             ignore_paths: _,
             cancel: _,
         } = self;
+        let (path, slab_root, slab) = slab.into_parts();
         let name_index = name_index.into_persistent();
         write_cache_to_file(
             cache_path,
@@ -637,7 +504,7 @@ impl SearchCache {
             .map(|node_index| {
                 let path = self.node_path(node_index);
                 let metadata = self
-                    .slab
+                    .file_nodes
                     .get_mut(node_index)
                     .map(|node| {
                         match (node.metadata.state(), &path) {
@@ -669,7 +536,7 @@ impl SearchCache {
             if event.flag.contains(EventFlag::HistoryDone) {
                 info!("History processing done: {:?}", event);
             }
-            if event.should_rescan(&self.path) {
+            if event.should_rescan(self.file_nodes.path()) {
                 info!("Event rescan: {:?}", event);
                 true
             } else {
@@ -792,10 +659,11 @@ pub enum HandleFSEError {
 }
 
 /// Note: This function is expected to be called with WalkData which metadata is not fetched.
-fn construct_node_slab(
+fn construct_node_slab_name_index(
     parent: Option<SlabIndex>,
     node: &Node,
     slab: &mut ThinSlab<SlabNode>,
+    name_index: &mut NameIndex,
 ) -> SlabIndex {
     let metadata = match node.metadata {
         Some(metadata) => SlabNodeMetadataCompact::some(metadata),
@@ -804,10 +672,15 @@ fn construct_node_slab(
     let name = NAME_POOL.push(&node.name);
     let slab_node = SlabNode::new(parent, name, metadata);
     let index = slab.insert(slab_node);
+    unsafe {
+        // SAFETY: fswalk sorts each directory's children by name before we recurse,
+        // so this preorder traversal visits nodes in lexicographic path order.
+        name_index.add_index_ordered(name, index);
+    }
     slab[index].children = node
         .children
         .iter()
-        .map(|node| construct_node_slab(Some(index), node, slab))
+        .map(|node| construct_node_slab_name_index(Some(index), node, slab, name_index))
         .collect();
     index
 }
@@ -830,7 +703,7 @@ impl SearchCache {
         let name = NAME_POOL.push(&node.name);
         let slab_node = SlabNode::new(parent, name, metadata);
         let index = self.push_node(slab_node);
-        self.slab[index].children = node
+        self.file_nodes[index].children = node
             .children
             .iter()
             .map(|node| self.create_node_slab_update_name_index_and_name_pool(Some(index), node))
@@ -844,8 +717,129 @@ pub static NAME_POOL: LazyLock<NamePool> = LazyLock::new(NamePool::new);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, path::PathBuf};
     use tempdir::TempDir;
+
+    fn make_node(name: &str, children: Vec<Node>) -> Node {
+        Node {
+            children,
+            name: name.into(),
+            metadata: None,
+        }
+    }
+
+    fn make_leaf(name: &str) -> Node {
+        make_node(name, vec![])
+    }
+
+    fn push_child(slab: &mut ThinSlab<SlabNode>, parent: SlabIndex, name: &str) -> SlabIndex {
+        let idx = slab.insert(SlabNode::new(
+            Some(parent),
+            NAME_POOL.push(name),
+            SlabNodeMetadataCompact::none(),
+        ));
+        slab[parent].children.push(idx);
+        idx
+    }
+
+    fn manual_target_tree_file_nodes() -> (FileNodes, [SlabIndex; 3]) {
+        let mut slab = ThinSlab::new();
+        let root_idx = slab.insert(SlabNode::new(
+            None,
+            NAME_POOL.push("root"),
+            SlabNodeMetadataCompact::none(),
+        ));
+        let alpha = push_child(&mut slab, root_idx, "alpha");
+        let beta = push_child(&mut slab, root_idx, "beta");
+        let root_target = push_child(&mut slab, root_idx, "target.txt");
+        let alpha_target = push_child(&mut slab, alpha, "target.txt");
+        let beta_target = push_child(&mut slab, beta, "target.txt");
+        let file_nodes = FileNodes::new(PathBuf::from("/virtual/root"), slab, root_idx);
+        (file_nodes, [root_target, alpha_target, beta_target])
+    }
+
+    #[test]
+    fn test_construct_node_slab_name_index_preserves_path_order() {
+        let tree = make_node(
+            "root",
+            vec![
+                make_node("alpha", vec![make_leaf("shared")]),
+                make_node("beta", vec![make_node("gamma", vec![make_leaf("shared")])]),
+                make_leaf("shared"),
+            ],
+        );
+        let mut slab = ThinSlab::new();
+        let mut name_index = NameIndex::default();
+        let root = construct_node_slab_name_index(None, &tree, &mut slab, &mut name_index);
+        let file_nodes = FileNodes::new(PathBuf::from("/virtual/root"), slab, root);
+
+        let shared_entries = name_index.get("shared").expect("shared entries");
+        assert_eq!(shared_entries.len(), 3);
+        let paths: Vec<PathBuf> = shared_entries
+            .iter()
+            .map(|index| file_nodes.node_path(*index).expect("path must exist"))
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(
+            paths, sorted,
+            "shared entries must follow lexicographic path order"
+        );
+    }
+
+    #[test]
+    fn test_name_index_add_index_sorts_paths() {
+        let (file_nodes, targets) = manual_target_tree_file_nodes();
+        let mut name_index = NameIndex::default();
+
+        for &index in targets.iter().rev() {
+            name_index.add_index("target.txt", index, &file_nodes);
+        }
+
+        let entries = name_index
+            .get("target.txt")
+            .expect("target.txt entries must exist");
+        assert_eq!(entries.len(), 3);
+        let paths: Vec<PathBuf> = entries
+            .iter()
+            .map(|index| file_nodes.node_path(*index).expect("path exists"))
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(paths, sorted, "add_index must maintain lexicographic order");
+    }
+
+    #[test]
+    fn test_walk_fs_with_walk_data_preserves_name_index_order() {
+        let temp_dir =
+            TempDir::new("walk_fs_with_walk_data_orders").expect("Failed to create temp dir");
+        let root = temp_dir.path();
+        fs::create_dir(root.join("beta")).unwrap();
+        fs::create_dir(root.join("alpha")).unwrap();
+        fs::File::create(root.join("target.txt")).unwrap();
+        fs::File::create(root.join("alpha/target.txt")).unwrap();
+        fs::File::create(root.join("beta/target.txt")).unwrap();
+
+        let walk_data = WalkData::simple(false);
+        let cache = SearchCache::walk_fs_with_walk_data(root.to_path_buf(), &walk_data, None, None)
+            .expect("walk cache");
+
+        let entries = cache
+            .name_index
+            .get("target.txt")
+            .expect("target.txt entries");
+        assert_eq!(entries.len(), 3);
+        let paths: Vec<PathBuf> = entries
+            .iter()
+            .map(|index| cache.file_nodes.node_path(*index).expect("path exists"))
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(
+            paths, sorted,
+            "walk_fs_with_walk_data must yield lexicographically ordered slab indices"
+        );
+    }
 
     #[test]
     fn test_search_cache_walk_and_verify() {
@@ -858,7 +852,7 @@ mod tests {
 
         let cache = SearchCache::walk_fs(temp_path.to_path_buf());
 
-        assert_eq!(cache.slab.len(), 4);
+        assert_eq!(cache.file_nodes.len(), 4);
         assert_eq!(cache.name_index.len(), 4);
     }
 
@@ -870,7 +864,7 @@ mod tests {
 
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
 
         fs::File::create(temp_path.join("new_file.txt")).expect("Failed to create file");
@@ -883,7 +877,7 @@ mod tests {
 
         cache.handle_fs_events(mock_events).unwrap();
 
-        assert_eq!(cache.slab.len(), 2);
+        assert_eq!(cache.file_nodes.len(), 2);
         assert_eq!(cache.name_index.len(), 2);
         assert_eq!(cache.search("new_file.txt").unwrap().len(), 1);
     }
@@ -896,7 +890,7 @@ mod tests {
 
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 2);
+        assert_eq!(cache.file_nodes.len(), 2);
         assert_eq!(cache.name_index.len(), 2);
 
         let mock_events = vec![FsEvent {
@@ -907,7 +901,7 @@ mod tests {
 
         cache.handle_fs_events(mock_events).unwrap();
 
-        assert_eq!(cache.slab.len(), 2);
+        assert_eq!(cache.file_nodes.len(), 2);
         assert_eq!(cache.name_index.len(), 2);
         assert_eq!(cache.search("new_file.txt").unwrap().len(), 1);
     }
@@ -920,7 +914,7 @@ mod tests {
 
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
 
         fs::File::create(temp_path.join("new_file.txt")).expect("Failed to create file");
@@ -933,7 +927,7 @@ mod tests {
 
         cache.handle_fs_events(mock_events).unwrap();
 
-        assert_eq!(cache.slab.len(), 2);
+        assert_eq!(cache.file_nodes.len(), 2);
         assert_eq!(cache.name_index.len(), 2);
         assert_eq!(cache.search("new_file.txt").unwrap().len(), 1);
     }
@@ -1001,7 +995,7 @@ mod tests {
 
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 2);
+        assert_eq!(cache.file_nodes.len(), 2);
         assert_eq!(cache.name_index.len(), 2);
 
         fs::remove_file(temp_path.join("new_file.txt")).expect("Failed to remove file");
@@ -1015,7 +1009,7 @@ mod tests {
         cache.handle_fs_events(mock_events).unwrap();
 
         // Though the file in fsevents removed, we should still preserve it since it exists on disk.
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
         assert_eq!(cache.search("new_file.txt").unwrap().len(), 0);
     }
@@ -1028,7 +1022,7 @@ mod tests {
         let mut event_id = cache.last_event_id + 1;
         println!(
             "Cache size: {}, process time: {:?}",
-            cache.slab.len(),
+            cache.file_nodes.len(),
             instant.elapsed()
         );
         // test speed of handling fs event
@@ -1056,7 +1050,7 @@ mod tests {
         let temp_path = temp_dir.path();
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
 
         fs::File::create(temp_path.join("new_file.txt")).expect("Failed to create file");
@@ -1070,7 +1064,7 @@ mod tests {
         cache.handle_fs_events(mock_events).unwrap();
 
         // Though the file in fsevents removed, we should still preserve it since it exists on disk.
-        assert_eq!(cache.slab.len(), 2);
+        assert_eq!(cache.file_nodes.len(), 2);
         assert_eq!(cache.name_index.len(), 2);
         assert_eq!(cache.search("new_file.txt").unwrap().len(), 1);
     }
@@ -1081,7 +1075,7 @@ mod tests {
         let temp_path = temp_dir.path();
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
 
         fs::File::create(temp_path.join("new_file.txt")).expect("Failed to create file");
@@ -1102,7 +1096,7 @@ mod tests {
         cache.handle_fs_events(mock_events).unwrap();
 
         // Though the file in fsevents removed, we should still preserve it since it exists on disk.
-        assert_eq!(cache.slab.len(), 2);
+        assert_eq!(cache.file_nodes.len(), 2);
         assert_eq!(cache.name_index.len(), 2);
         assert_eq!(cache.search("new_file.txt").unwrap().len(), 1);
     }
@@ -1118,7 +1112,7 @@ mod tests {
         fs::File::create(temp_path.join("src/foo/good.rs")).expect("Failed to create file");
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 7);
+        assert_eq!(cache.file_nodes.len(), 7);
         assert_eq!(cache.name_index.len(), 7);
 
         let mock_events = vec![FsEvent {
@@ -1129,7 +1123,7 @@ mod tests {
 
         cache.handle_fs_events(mock_events).unwrap_err();
 
-        assert_eq!(cache.slab.len(), 7);
+        assert_eq!(cache.file_nodes.len(), 7);
         assert_eq!(cache.name_index.len(), 7);
         assert_eq!(cache.search("new_file").unwrap().len(), 3);
         assert_eq!(cache.search("good.rs").unwrap().len(), 1);
@@ -1142,7 +1136,7 @@ mod tests {
         let temp_path = temp_dir.path();
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
 
         fs::File::create(temp_path.join("new_file.txt")).expect("Failed to create file");
@@ -1160,7 +1154,7 @@ mod tests {
         cache.handle_fs_events(mock_events).unwrap_err();
 
         // Rescan is required
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
     }
 
@@ -1170,7 +1164,7 @@ mod tests {
         let temp_path = temp_dir.path();
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
 
         fs::File::create(temp_path.join("new_file.txt")).expect("Failed to create file");
@@ -1187,7 +1181,7 @@ mod tests {
 
         cache.handle_fs_events(mock_events).unwrap_err();
 
-        assert_eq!(cache.slab.len(), 1);
+        assert_eq!(cache.file_nodes.len(), 1);
         assert_eq!(cache.name_index.len(), 1);
     }
 
@@ -1206,7 +1200,7 @@ mod tests {
         fs::File::create(temp_path.join("src/boo.rs")).expect("Failed to create file");
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 11);
+        assert_eq!(cache.file_nodes.len(), 11);
         assert_eq!(cache.name_index.len(), 11);
         assert_eq!(cache.search("src").unwrap().len(), 1);
         assert_eq!(cache.search("new_file").unwrap().len(), 3);
@@ -1225,7 +1219,7 @@ mod tests {
 
         cache.handle_fs_events(mock_events).unwrap();
 
-        assert_eq!(cache.slab.len(), 5);
+        assert_eq!(cache.file_nodes.len(), 5);
         assert_eq!(cache.name_index.len(), 5);
         assert_eq!(cache.search("src").unwrap().len(), 0);
         assert_eq!(cache.search("new_file").unwrap().len(), 3);
@@ -1249,7 +1243,7 @@ mod tests {
         fs::File::create(temp_path.join("src/boo.rs")).expect("Failed to create file");
         let mut cache = SearchCache::walk_fs(temp_dir.path().to_path_buf());
 
-        assert_eq!(cache.slab.len(), 11);
+        assert_eq!(cache.file_nodes.len(), 11);
         assert_eq!(cache.name_index.len(), 11);
         assert_eq!(cache.search("src").unwrap().len(), 1);
         assert_eq!(cache.search("new_file").unwrap().len(), 3);
@@ -1268,7 +1262,7 @@ mod tests {
 
         cache.handle_fs_events(mock_events).unwrap();
 
-        assert_eq!(cache.slab.len(), 9);
+        assert_eq!(cache.file_nodes.len(), 9);
         assert_eq!(cache.name_index.len(), 9);
         assert_eq!(cache.search("src").unwrap().len(), 1);
         assert_eq!(cache.search("new_file").unwrap().len(), 3);
@@ -1292,7 +1286,7 @@ mod tests {
         let cache = SearchCache::walk_fs(root_path.to_path_buf());
 
         // Directory nodes should always carry metadata.
-        assert!(cache.slab[cache.slab_root].metadata.is_some());
+        assert!(cache.file_nodes[cache.file_nodes.root()].metadata.is_some());
 
         // Check metadata for a file node
         let file_nodes = cache
@@ -1302,7 +1296,7 @@ mod tests {
         let file_node_idx = file_nodes.into_iter().next().unwrap();
         // File nodes should always have `metadata` set to `None`.
         assert!(
-            cache.slab[file_node_idx].metadata.is_none(),
+            cache.file_nodes[file_node_idx].metadata.is_none(),
             "Metadata for file node created by walk_fs_new should be None"
         );
 
@@ -1314,7 +1308,7 @@ mod tests {
         let file_node_idx = file_nodes.into_iter().next().unwrap();
         // File nodes should always have `metadata` set to `None`.
         assert!(
-            cache.slab[file_node_idx].metadata.is_none(),
+            cache.file_nodes[file_node_idx].metadata.is_none(),
             "Metadata for file node created by walk_fs_new should be None"
         );
 
@@ -1324,7 +1318,7 @@ mod tests {
         let dir_node_idx = dir_nodes.into_iter().next().unwrap();
         // Directory nodes should always carry metadata.
         assert!(
-            cache.slab[dir_node_idx].metadata.is_some(),
+            cache.file_nodes[dir_node_idx].metadata.is_some(),
             "Metadata for directory node created by walk_fs_new should be Some"
         );
     }
@@ -1363,7 +1357,7 @@ mod tests {
             "Expected 1 node for event_file.txt after event"
         );
         let file_node_idx = file_nodes.into_iter().next().unwrap();
-        let file_slab_meta = cache.slab[file_node_idx]
+        let file_slab_meta = cache.file_nodes[file_node_idx]
             .metadata
             .as_ref()
             .expect("Metadata for event_file.txt should be populated by event handler");
@@ -1404,7 +1398,7 @@ mod tests {
             "Expected 1 node for event_subdir after event"
         );
         let dir_node_idx = dir_nodes.into_iter().next().unwrap();
-        let dir_slab_meta = cache.slab[dir_node_idx]
+        let dir_slab_meta = cache.file_nodes[dir_node_idx]
             .metadata
             .as_ref()
             .expect("Metadata for event_subdir should be populated by event handler");
@@ -1423,7 +1417,7 @@ mod tests {
             "Expected 1 node for file_in_event_subdir.txt after event"
         );
         let file_in_subdir_node_idx = file_in_subdir_nodes.into_iter().next().unwrap();
-        let file_in_subdir_slab_meta = cache.slab[file_in_subdir_node_idx]
+        let file_in_subdir_slab_meta = cache.file_nodes[file_in_subdir_node_idx]
             .metadata
             .as_ref()
             .expect("Metadata for file_in_event_subdir.txt should be populated");
